@@ -28,7 +28,7 @@ uv run test_submission.py model.onnx                       # check a model befor
 
 ## Training data
 
-**Download: `train.zip` (80 MB; 3.1 GB unzipped) from [Google Drive](TODO-LINK).** Unzip it to get one file, `train.npz`, with three
+**Download: `train.zip` (80 MB; 3.1 GB unzipped) from [Google Drive](https://drive.google.com/file/d/141IeuuwK_ycIztdHjYGfNFqDWzuO9z-h/view?usp=sharing).** Unzip it to get one file, `train.npz`, with three
 arrays:
 
 | Array | dtype, shape | Content |
