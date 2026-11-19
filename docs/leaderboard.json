@@ -17,6 +17,26 @@
   "rows": [
     {
       "rank": 1,
+      "participant": "1eb09688a473bf36",
+      "participant_id": "1eb09688a473bf36",
+      "groups": [],
+      "score": 1.095335,
+      "metrics": {
+        "score": 1.095335,
+        "score_point_maze_position": 1.006012,
+        "score_point_maze_velocity": 1.112321,
+        "score_point_maze_inverse": 1.063156,
+        "score_point_maze_plan": 1.467946,
+        "score_wall_position": 1.042061,
+        "score_wall_inverse": 0.966484,
+        "score_wall_plan": 1.076389
+      },
+      "status": "succeeded",
+      "submission_id": "eae6273845946ec13dc8689ca5292292b0871569019e48cfc680cddf27268cf3",
+      "submitted_at": "2026-11-19T04:39:05.281Z"
+    },
+    {
+      "rank": 2,
       "participant": "66e6786978cc9d80",
       "participant_id": "66e6786978cc9d80",
       "groups": [],
@@ -70,20 +90,8 @@
       "submission_id": "4973acd5577e82a38be00a3c3435bb7b43c294519f9eabd6e5c573c1d0eacc46",
       "submitted_at": "2026-11-18T23:46:40.540Z",
       "logs": "Evaluator did not return valid JSON. Organizers can inspect the private log for the traceback."
-    },
-    {
-      "rank": null,
-      "participant": "1eb09688a473bf36",
-      "participant_id": "1eb09688a473bf36",
-      "groups": [],
-      "score": null,
-      "metrics": {},
-      "status": "failed",
-      "submission_id": "d7f82cf88cf7fd7b200e82ca3a8d3a1148f3c3f9bc064ed9b81b50f14ce35390",
-      "submitted_at": "2026-11-18T22:14:53.363Z",
-      "logs": "Evaluator did not return valid JSON. Organizers can inspect the private log for the traceback."
     }
   ],
-  "revision": 10,
-  "updated_at": "2026-11-19T04:38:47.633Z"
+  "revision": 11,
+  "updated_at": "2026-11-19T15:18:07.374Z"
 }
