@@ -34,8 +34,56 @@
       "status": "succeeded",
       "submission_id": "660172a18a0e65cdd391608cb32466d6a5e218f5a41467c67bae8f62fbb87d66",
       "submitted_at": "2026-11-13T00:03:11.652Z"
+    },
+    {
+      "rank": null,
+      "participant": "cc67db7fd895214a",
+      "participant_id": "cc67db7fd895214a",
+      "groups": [],
+      "score": null,
+      "metrics": {},
+      "status": "failed",
+      "submission_id": "e23cb4a6bd3571dc2bf86a75d7b4a6c6409149242952fd3231d6f1a9bec532a7",
+      "submitted_at": "2026-11-19T03:54:14.548Z",
+      "logs": "Evaluator did not return valid JSON. Organizers can inspect the private log for the traceback."
+    },
+    {
+      "rank": null,
+      "participant": "431c18a08461d450",
+      "participant_id": "431c18a08461d450",
+      "groups": [],
+      "score": null,
+      "metrics": {},
+      "status": "failed",
+      "submission_id": "c65168f314b5a26091fab1cf254a9c4231963629efd56e8776c5080be713404e",
+      "submitted_at": "2026-11-19T02:29:04.634Z",
+      "logs": "Evaluator did not return valid JSON. Organizers can inspect the private log for the traceback."
+    },
+    {
+      "rank": null,
+      "participant": "de76d02bc85bb668",
+      "participant_id": "de76d02bc85bb668",
+      "groups": [],
+      "score": null,
+      "metrics": {},
+      "status": "failed",
+      "submission_id": "4973acd5577e82a38be00a3c3435bb7b43c294519f9eabd6e5c573c1d0eacc46",
+      "submitted_at": "2026-11-18T23:46:40.540Z",
+      "logs": "Evaluator did not return valid JSON. Organizers can inspect the private log for the traceback."
+    },
+    {
+      "rank": null,
+      "participant": "1eb09688a473bf36",
+      "participant_id": "1eb09688a473bf36",
+      "groups": [],
+      "score": null,
+      "metrics": {},
+      "status": "failed",
+      "submission_id": "d7f82cf88cf7fd7b200e82ca3a8d3a1148f3c3f9bc064ed9b81b50f14ce35390",
+      "submitted_at": "2026-11-18T22:14:53.363Z",
+      "logs": "Evaluator did not return valid JSON. Organizers can inspect the private log for the traceback."
     }
   ],
-  "revision": 9,
-  "updated_at": "2026-11-18T04:53:41.265Z"
+  "revision": 10,
+  "updated_at": "2026-11-19T04:38:47.633Z"
 }
