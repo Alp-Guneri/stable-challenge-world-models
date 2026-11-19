@@ -2,7 +2,7 @@
 
     python test_submission.py model.onnx
 
-Runs the evaluator's own loading and inference code (model_format.py, next to this file) on random inputs, so a model
+Runs the evaluator's own loading and inference code (evaluate.py, next to this file) on random inputs, so a model
 that passes here loads and runs the same way in the official evaluation. Checks:
 
     1. loads in onnxruntime: inputs 'frames' (64, 3, 3, 64, 64) and 'actions' (64, 5, 10), one output   evaluator
@@ -25,10 +25,10 @@ import time
 
 import numpy as np
 
-from model_format import ACTIONS_SHAPE, BATCH, HIST, HORIZON, SIZE, SubmissionError, load_model, run_batches
+from evaluate import (ACTIONS_SHAPE, BATCH, HIST, HORIZON, MAX_INFERENCE_SECONDS, SIZE, SUITE_SAMPLES, SubmissionError,
+                      load_model, run_batches)
 
 OPSET_MIN, MAX_MIB = 17, 20
-SUITE_SAMPLES = 33_792  # model inputs processed by the full evaluation
 rng = np.random.default_rng(0)
 
 
@@ -114,6 +114,9 @@ def check(path):
     rate = len(f) / (time.perf_counter() - start)
     print(f"[info] {rate:,.0f} samples/s on {provider} ({os.cpu_count()} cores): the full evaluation "
           f"({SUITE_SAMPLES:,} samples) would take ~{SUITE_SAMPLES / rate / 60:.1f} min on this machine")
+    if SUITE_SAMPLES / rate > MAX_INFERENCE_SECONDS / 2:
+        print(f"[warn] the evaluation rejects models whose inference takes over {MAX_INFERENCE_SECONDS / 60:.0f} min "
+              "on its CPU, which may be slower than this machine: make the model smaller or faster")
     return ok
 
 

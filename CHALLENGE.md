@@ -73,13 +73,19 @@ Actions are raw (not normalized); normalize inside your model if you want to.
 
 ## Evaluation
 
-The evaluation (its data, tasks and metrics) is **hidden**, so that nobody tunes a model to it instead of making
-it a good world model. Only the total score is published.
+The evaluation's data, tasks and metrics are **hidden**, so that nobody tunes a model to them instead of making it a
+good world model. Only the total score is published.
+
+[evaluate.py](evaluate.py) is the official evaluator: `uv run evaluate.py model.onnx path/to/eval_data` loads your
+model, runs it, and prints `{"score": ...}`, or `{"error": ...}` if the model breaks the format. It runs the hidden
+tasks that come with the private evaluation data, so you cannot run it yourself, but `test_submission.py` uses
+the same loading and inference code.
 
 The score is normalized so that **0** is an untrained encoder with no dynamics (`example_train.py --floor`) and
 **1** is the reference model trained by `example_train.py` (retraining it with another seed scores ~0.96). Higher is
 better, and good submissions should exceed 1. The evaluation runs on CPU and takes well under a minute for the
-reference model; `test_submission.py` estimates the time for yours.
+reference model. Models whose inference alone would take over 4 minutes on the evaluation's CPU are rejected;
+`test_submission.py` estimates the time for yours.
 
 ## Example
 

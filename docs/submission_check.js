@@ -2,7 +2,7 @@
 // Browser version of test_submission.py. The submission page runs it in a Web Worker on the chosen file and only
 // uploads files that pass, so a broken model doesn't use up one of the participant's daily attempts.
 //
-// Keep the checks in step with test_submission.py and model_format.py (load_model, run_batches), which stay the reference.
+// Keep the checks in step with test_submission.py and evaluate.py (load_model, run_batches), which stay the reference.
 // It adds a first check that the file is ONNX at all; the throughput estimate runs only locally.
 //
 // Protocol: the page posts {file, max_bytes, base_url}; this script posts
@@ -25,7 +25,7 @@ const EXPORT_HINT = "export() in example_train.py exports a world model in the r
 
 class Failed extends Error {}  // a problem with the model; the message says how to fix it
 class Unavailable extends Error {}  // the check itself could not run in this browser
-class SubmissionError extends Error {}  // raised by run, like model_format.SubmissionError
+class SubmissionError extends Error {}  // raised by run, like evaluate.SubmissionError
 
 const post = message => self.postMessage(message);
 
@@ -284,7 +284,7 @@ function startRuntime() {
   return runtime;
 }
 
-// Same rules as model_format.load_model.
+// Same rules as evaluate.load_model.
 async function checkLoad(ctx) {
   try {
     await startRuntime();
@@ -372,7 +372,7 @@ function explainSubmissionError(e) {
   return msg;
 }
 
-// Same as model_format.run_batches for one full batch: frames float32 [BATCH * FRAME_SIZE] in [0, 1] and actions
+// Same as evaluate.run_batches for one full batch: frames float32 [BATCH * FRAME_SIZE] in [0, 1] and actions
 // float32 [BATCH * ACTION_SIZE] -> z as BATCH rows of [(HORIZON + 1) * D] values, and D.
 async function run(sess, frames, actions) {
   let z;

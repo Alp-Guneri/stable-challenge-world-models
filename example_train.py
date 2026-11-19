@@ -39,7 +39,7 @@ from stable_pretraining.losses.utils import VCRegLoss
 
 sys.path.insert(0, str(Path(__file__).parent))
 import corpus_loader  # noqa: E402
-from model_format import ACTION_DIM, BATCH, HIST, HORIZON, SIZE, SKIP  # noqa: E402
+from evaluate import ACTION_DIM, BATCH, HIST, HORIZON, SIZE, SKIP  # noqa: E402
 
 OPSET = 17
 SPAN_BACK, SPAN_FWD = (HIST - 1) * SKIP, HORIZON * SKIP

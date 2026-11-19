@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
   "numpy",
+  "scikit-learn",
   "onnx",
   "onnxruntime-gpu==1.22.*; sys_platform == 'linux'",
   "onnxruntime==1.22.*; sys_platform != 'linux'",
