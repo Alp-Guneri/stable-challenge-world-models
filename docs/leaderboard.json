@@ -3,95 +3,11 @@
   "groups": [],
   "metric": "score",
   "metrics": [
-    "score",
-    "score_point_maze_inverse",
-    "score_point_maze_plan",
-    "score_point_maze_position",
-    "score_point_maze_velocity",
-    "score_wall_inverse",
-    "score_wall_plan",
-    "score_wall_position"
+    "score"
   ],
   "direction": "maximize",
-  "evaluator_version": "eval-26399418f838c8d804302c928dd04012",
-  "rows": [
-    {
-      "rank": 1,
-      "participant": "1eb09688a473bf36",
-      "participant_id": "1eb09688a473bf36",
-      "groups": [],
-      "score": 1.095335,
-      "metrics": {
-        "score": 1.095335,
-        "score_point_maze_position": 1.006012,
-        "score_point_maze_velocity": 1.112321,
-        "score_point_maze_inverse": 1.063156,
-        "score_point_maze_plan": 1.467946,
-        "score_wall_position": 1.042061,
-        "score_wall_inverse": 0.966484,
-        "score_wall_plan": 1.076389
-      },
-      "status": "succeeded",
-      "submission_id": "eae6273845946ec13dc8689ca5292292b0871569019e48cfc680cddf27268cf3",
-      "submitted_at": "2026-11-19T04:39:05.281Z"
-    },
-    {
-      "rank": 2,
-      "participant": "66e6786978cc9d80",
-      "participant_id": "66e6786978cc9d80",
-      "groups": [],
-      "score": 0.999999,
-      "metrics": {
-        "score": 0.999999,
-        "score_point_maze_position": 1,
-        "score_point_maze_velocity": 0.999999,
-        "score_point_maze_inverse": 0.999999,
-        "score_point_maze_plan": 0.999998,
-        "score_wall_position": 0.999998,
-        "score_wall_inverse": 1,
-        "score_wall_plan": 1
-      },
-      "status": "succeeded",
-      "submission_id": "660172a18a0e65cdd391608cb32466d6a5e218f5a41467c67bae8f62fbb87d66",
-      "submitted_at": "2026-11-13T00:03:11.652Z"
-    },
-    {
-      "rank": null,
-      "participant": "cc67db7fd895214a",
-      "participant_id": "cc67db7fd895214a",
-      "groups": [],
-      "score": null,
-      "metrics": {},
-      "status": "failed",
-      "submission_id": "e23cb4a6bd3571dc2bf86a75d7b4a6c6409149242952fd3231d6f1a9bec532a7",
-      "submitted_at": "2026-11-19T03:54:14.548Z",
-      "logs": "Evaluator did not return valid JSON. Organizers can inspect the private log for the traceback."
-    },
-    {
-      "rank": null,
-      "participant": "431c18a08461d450",
-      "participant_id": "431c18a08461d450",
-      "groups": [],
-      "score": null,
-      "metrics": {},
-      "status": "failed",
-      "submission_id": "c65168f314b5a26091fab1cf254a9c4231963629efd56e8776c5080be713404e",
-      "submitted_at": "2026-11-19T02:29:04.634Z",
-      "logs": "Evaluator did not return valid JSON. Organizers can inspect the private log for the traceback."
-    },
-    {
-      "rank": null,
-      "participant": "de76d02bc85bb668",
-      "participant_id": "de76d02bc85bb668",
-      "groups": [],
-      "score": null,
-      "metrics": {},
-      "status": "failed",
-      "submission_id": "4973acd5577e82a38be00a3c3435bb7b43c294519f9eabd6e5c573c1d0eacc46",
-      "submitted_at": "2026-11-18T23:46:40.540Z",
-      "logs": "Evaluator did not return valid JSON. Organizers can inspect the private log for the traceback."
-    }
-  ],
-  "revision": 11,
-  "updated_at": "2026-11-19T15:18:07.374Z"
+  "evaluator_version": "eval-06c76d1b7b25ebfb0e71016cab783c23",
+  "rows": [],
+  "revision": 12,
+  "updated_at": "2026-11-19T15:59:40.927Z"
 }
