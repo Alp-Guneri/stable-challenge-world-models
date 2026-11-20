@@ -10,19 +10,6 @@
   "rows": [
     {
       "rank": 1,
-      "participant": "1eb09688a473bf36",
-      "participant_id": "1eb09688a473bf36",
-      "groups": [],
-      "score": 1.095335,
-      "metrics": {
-        "score": 1.095335
-      },
-      "status": "succeeded",
-      "submission_id": "eae6273845946ec13dc8689ca5292292b0871569019e48cfc680cddf27268cf3",
-      "submitted_at": "2026-11-19T04:39:05.281Z"
-    },
-    {
-      "rank": 2,
       "participant": "cc67db7fd895214a",
       "participant_id": "cc67db7fd895214a",
       "groups": [],
@@ -35,7 +22,7 @@
       "submitted_at": "2026-11-19T03:54:14.548Z"
     },
     {
-      "rank": 3,
+      "rank": 2,
       "participant": "66e6786978cc9d80",
       "participant_id": "66e6786978cc9d80",
       "groups": [],
@@ -48,32 +35,42 @@
       "submitted_at": "2026-11-13T00:03:11.652Z"
     },
     {
-      "rank": 4,
+      "rank": null,
+      "participant": "1eb09688a473bf36",
+      "participant_id": "1eb09688a473bf36",
+      "groups": [],
+      "score": null,
+      "metrics": {},
+      "status": "failed",
+      "submission_id": "072475fb38b6fd07079a14fe7d4154b4e1b8e21eee71efaec4b9e750f97bbe2c",
+      "submitted_at": "2026-11-19T22:21:50.668Z",
+      "logs": "The evaluation failed with an internal error (FileNotFoundError); the organizers have the details."
+    },
+    {
+      "rank": null,
+      "participant": "a36c5213107478f4",
+      "participant_id": "a36c5213107478f4",
+      "groups": [],
+      "score": null,
+      "metrics": {},
+      "status": "failed",
+      "submission_id": "d14496b4aef3a4a182cc61ec2b5683ba88c828ec3677dff3f92bf7eadaf68321",
+      "submitted_at": "2026-11-19T20:27:27.163Z",
+      "logs": "The evaluation failed with an internal error (FileNotFoundError); the organizers have the details."
+    },
+    {
+      "rank": null,
       "participant": "431c18a08461d450",
       "participant_id": "431c18a08461d450",
       "groups": [],
-      "score": 0.968009,
-      "metrics": {
-        "score": 0.968009
-      },
-      "status": "succeeded",
-      "submission_id": "c65168f314b5a26091fab1cf254a9c4231963629efd56e8776c5080be713404e",
-      "submitted_at": "2026-11-19T02:29:04.634Z"
-    },
-    {
-      "rank": 5,
-      "participant": "de76d02bc85bb668",
-      "participant_id": "de76d02bc85bb668",
-      "groups": [],
-      "score": 0.285491,
-      "metrics": {
-        "score": 0.285491
-      },
-      "status": "succeeded",
-      "submission_id": "4973acd5577e82a38be00a3c3435bb7b43c294519f9eabd6e5c573c1d0eacc46",
-      "submitted_at": "2026-11-18T23:46:40.540Z"
+      "score": null,
+      "metrics": {},
+      "status": "failed",
+      "submission_id": "3e2bc599bcb4fd9958a5e296ede8cd41a6143569899962ec5f145a846ac015ca",
+      "submitted_at": "2026-11-19T16:23:18.243Z",
+      "logs": "The evaluation failed with an internal error (FileNotFoundError); the organizers have the details."
     }
   ],
-  "revision": 13,
-  "updated_at": "2026-11-19T16:06:34.168Z"
+  "revision": 14,
+  "updated_at": "2026-11-20T04:03:21.753Z"
 }
