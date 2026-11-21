@@ -24,6 +24,7 @@ output does not depend on the actions, a causal predictor, and a clean ONNX expo
 from __future__ import annotations
 
 import argparse
+import copy
 import sys
 from pathlib import Path
 
@@ -37,9 +38,8 @@ import stable_pretraining as spt
 from stable_pretraining.backbone import MLP
 from stable_pretraining.losses.utils import VCRegLoss
 
-sys.path.insert(0, str(Path(__file__).parent))
-import corpus_loader  # noqa: E402
-from evaluate import ACTION_DIM, BATCH, HIST, HORIZON, SIZE, SKIP  # noqa: E402
+import corpus_loader
+from evaluate import ACTION_DIM, BATCH, HIST, HORIZON, SIZE, SKIP
 
 OPSET = 17
 SPAN_BACK, SPAN_FWD = (HIST - 1) * SKIP, HORIZON * SKIP
@@ -70,24 +70,57 @@ class Predictor(nn.Module):
         super().__init__()
         self.mlp = MLP(dim + ACTION_DIM * SKIP, [hidden, hidden, dim], activation_layer=nn.GELU)
 
-    def forward(self, z, a):
-        return z + self.mlp(torch.cat([z, a], -1))
+    def forward(self, z, a, conditioning=None):
+        if conditioning is None:
+            conditioned = z
+        else:
+            scale, shift = conditioning
+            conditioned = z * (1 + scale) + shift
+        return z + self.mlp(torch.cat([conditioned, a], -1))
+
+
+class ActionEncoder(nn.Module):
+    """Use adjacent action pairs and their positions in the block to condition dynamics."""
+
+    def __init__(self, dim):
+        super().__init__()
+        self.temporal = nn.Sequential(
+            nn.Conv1d(ACTION_DIM, 32, kernel_size=3, padding=1),
+            nn.GELU(),
+            nn.Conv1d(32, 32, kernel_size=3, padding=1),
+            nn.GELU(),
+        )
+        self.affine = nn.Linear(32 * SKIP, 2 * dim)
+        nn.init.zeros_(self.affine.weight)
+        nn.init.zeros_(self.affine.bias)
+
+    def forward(self, actions):
+        batch, horizon, _ = actions.shape
+        blocks = actions.reshape(batch * horizon, SKIP, ACTION_DIM).transpose(1, 2)
+        features = self.temporal(blocks).flatten(1)
+        return self.affine(features).reshape(batch, horizon, -1).chunk(2, dim=-1)
 
 
 class WorldModel(nn.Module):
     """The submission contract: (frames [B, HIST, 3, 64, 64], actions [B, HORIZON, 2*SKIP]) -> z [B, HORIZON+1, D]."""
 
-    def __init__(self, dim=256, identity_dynamics=False):
+    def __init__(self, dim=256, identity_dynamics=False, *, width=32, hidden=512, action_encoder=False):
         super().__init__()
-        self.encoder = Encoder(dim)
-        self.predictor = Predictor(dim)
+        self.encoder = Encoder(dim, width)
+        self.predictor = Predictor(dim, hidden)
         self.identity_dynamics = identity_dynamics  # the score-0 floor: z never changes
+        self.action_encoder = ActionEncoder(dim) if action_encoder else None
 
     def rollout(self, z, actions):
         out = [z]
+        if self.identity_dynamics:
+            # Retain the actions input in the exported graph.
+            out.extend(z + 0 * actions[:, k, :1] for k in range(actions.shape[1]))
+            return torch.stack(out, 1)
+        conditioning = self.action_encoder(actions) if self.action_encoder is not None else None
         for k in range(actions.shape[1]):
-            # (the floor keeps a zero-weight use of the actions so the export still has the `actions` input)
-            z = z + 0 * actions[:, k, :1] if self.identity_dynamics else self.predictor(z, actions[:, k])
+            step_condition = None if conditioning is None else (conditioning[0][:, k], conditioning[1][:, k])
+            z = self.predictor(z, actions[:, k], step_condition)
             out.append(z)
         return torch.stack(out, 1)
 
@@ -102,10 +135,12 @@ class Windows(torch.utils.data.Dataset):
     SPAN_FWD actions from t, grouped SKIP per step: [HORIZON, 2*SKIP].
     """
 
-    def __init__(self, root):
-        self.c = corpus_loader.load(root)
+    def __init__(self, root, episodes=None):
+        self.c = root if isinstance(root, corpus_loader.Corpus) else corpus_loader.load(root)
+        episodes = range(len(self.c)) if episodes is None else episodes
         starts, ts = [], []
-        for i, n in enumerate(self.c.lengths):
+        for i in episodes:
+            n = self.c.lengths[i]
             t = np.arange(SPAN_BACK, n - SPAN_FWD)
             starts.append(np.full(len(t), self.c.offsets[i]))
             ts.append(t)
@@ -141,6 +176,10 @@ def jepa_forward(self, batch, stage):
     windows = torch.stack([frames[:, k : k + HIST] for k in range(HORIZON + 1)], 1)
     target = self.backbone.encoder(windows.flatten(0, 1)).view(b, HORIZON + 1, -1)
     pred = self.backbone.rollout(target[:, 0], batch["actions"])[:, 1:]
+    # Keep reductions in full precision for the common FP16 training recipe.
+    if target.dtype == torch.float16:
+        target = target.float()
+        pred = pred.float()
     pred_loss = F.mse_loss(pred, target[:, 1:])
     # VCReg on the embeddings, and on their deviation from each clip's mean: the second term needs the content that
     # changes over time (where the agent is) to vary, which the first alone can satisfy by separating scenes.
@@ -150,9 +189,33 @@ def jepa_forward(self, batch, stage):
     # model cannot satisfy it by shrinking the embeddings of a whole scene to one point.
     nce = sum(info_nce(pred[:, k], target[:, k + 1]) for k in range(HORIZON)) / HORIZON
     loss = 25 * pred_loss + reg + reg_t + nce
+    if getattr(self, "motion_head", None) is not None:
+        motion = motion_loss(self.motion_head, frames, target[:, 1:], pred)
+        loss = loss + self.motion_loss_weight * motion
+        self.log(f"{stage}/motion", motion, prog_bar=True)
     self.log_dict({f"{stage}/pred": pred_loss, f"{stage}/vcreg": reg, f"{stage}/vcreg_t": reg_t,
                    f"{stage}/nce": nce}, prog_bar=True)
     return {"loss": loss}
+
+
+MOTION_GRID = 8
+
+
+def make_motion_head(dim):
+    return nn.Sequential(nn.Linear(dim, 128), nn.GELU(), nn.Linear(128, MOTION_GRID ** 2))
+
+
+def motion_loss(head, frames, target, pred):
+    """Predict the distribution of visible changes between each future frame and its predecessor."""
+    delta = (frames[:, HIST:] - frames[:, HIST - 1:-1]).abs().mean(dim=2)
+    pooled = F.avg_pool2d(delta, kernel_size=SIZE // MOTION_GRID).flatten(2)
+    mass = pooled.sum(dim=-1, keepdim=True)
+    distribution = pooled / mass.clamp_min(1e-6)
+    encoded_logits = head(target).float()
+    forecast_logits = head(pred).float()
+    log_probs = (encoded_logits.log_softmax(dim=-1) + forecast_logits.log_softmax(dim=-1)) / 2
+    valid = mass.squeeze(-1) > 1e-6
+    return -(distribution * log_probs).sum() / valid.sum().clamp_min(1)
 
 
 def export(model, out: Path) -> None:
@@ -160,9 +223,21 @@ def export(model, out: Path) -> None:
     model.eval().to("cpu")
     frames = torch.rand(BATCH, HIST, 3, SIZE, SIZE)
     actions = torch.randn(BATCH, HORIZON, ACTION_DIM * SKIP)
-    torch.onnx.export(model, (frames, actions), str(out), input_names=["frames", "actions"], output_names=["z"],
-                      opset_version=OPSET, dynamo=False)
+    with torch.no_grad():
+        torch.onnx.export(model, (frames, actions), str(out), input_names=["frames", "actions"], output_names=["z"],
+                          opset_version=OPSET, dynamo=False)
     print(f"wrote {out}", file=sys.stderr)
+
+
+class ExportSnapshots(pl.Callback):
+    def __init__(self, out, steps):
+        self.out = out
+        self.steps = set(steps)
+
+    def on_train_batch_end(self, trainer, module, outputs, batch, batch_idx):
+        step = trainer.global_step
+        if step in self.steps:
+            export(copy.deepcopy(module.backbone), self.out.with_stem(f"{self.out.stem}_s{step}"))
 
 
 def main() -> None:
@@ -174,6 +249,14 @@ def main() -> None:
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--dim", type=int, default=256)
+    parser.add_argument("--width", type=int, default=32)
+    parser.add_argument("--hidden", type=int, default=512)
+    parser.add_argument("--val-frac", type=float, default=0.0)
+    parser.add_argument("--precision", choices=("16-mixed", "bf16-mixed", "32-true"))
+    parser.add_argument("--action-encoder", action="store_true")
+    parser.add_argument("--motion-loss-weight", type=float, default=0.0)
+    parser.add_argument("--snapshots", nargs="*", type=int, default=[])
     parser.add_argument("--floor", action="store_true", help="export the untrained, no-dynamics floor model")
     args = parser.parse_args()
     torch.manual_seed(args.seed)
@@ -183,21 +266,39 @@ def main() -> None:
         return
     if args.corpus is None:
         parser.error("--corpus is required unless --floor")
+    if args.motion_loss_weight < 0:
+        parser.error("--motion-loss-weight must be nonnegative")
+    corpus = corpus_loader.load(args.corpus)
+    try:
+        train_eps, val_eps = corpus_loader.episode_split(corpus, args.val_frac)
+    except ValueError as error:
+        parser.error(str(error))
 
+    backbone = WorldModel(dim=args.dim, width=args.width, hidden=args.hidden, action_encoder=args.action_encoder)
+    motion_head = make_motion_head(args.dim) if args.motion_loss_weight > 0 else None
     module = spt.Module(
-        backbone=WorldModel(),
+        backbone=backbone,
         vcreg=VCRegLoss(std_coeff=25, cov_coeff=1),
         forward=jepa_forward,
         optim={"optimizer": {"type": "AdamW", "lr": args.lr, "weight_decay": 1e-4},
                "scheduler": {"type": "CosineAnnealingLR", "T_max": args.steps}},
     )
-    data = Windows(args.corpus)
-    sampler = torch.utils.data.WeightedRandomSampler(data.weights, num_samples=args.steps * args.batch_size)
+    if motion_head is not None:
+        module.motion_head = motion_head
+        module.motion_loss_weight = args.motion_loss_weight
+    data = Windows(corpus, train_eps)
+    print(f"training on {len(train_eps)} episodes, holding out {len(val_eps)}; {args}", file=sys.stderr)
+    generator = torch.Generator().manual_seed(args.seed) if args.val_frac else None
+    sampler = torch.utils.data.WeightedRandomSampler(
+        data.weights, num_samples=args.steps * args.batch_size,
+        generator=generator,
+    )
     loader = torch.utils.data.DataLoader(data, batch_size=args.batch_size, sampler=sampler,
-                                         num_workers=args.workers, drop_last=True, persistent_workers=True)
+                                         num_workers=args.workers, drop_last=True, persistent_workers=args.workers > 0)
     trainer = pl.Trainer(
         max_steps=args.steps,
-        precision="bf16-mixed" if torch.cuda.is_available() else "32-true",
+        precision=args.precision or ("bf16-mixed" if torch.cuda.is_available() else "32-true"),
+        callbacks=[ExportSnapshots(args.out, args.snapshots)] if args.snapshots else [],
         logger=False,
         enable_checkpointing=False,
         log_every_n_steps=50,

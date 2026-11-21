@@ -54,3 +54,14 @@ class Corpus:
 
 def load(root):
     return Corpus(root)
+
+
+def episode_split(corpus, val_frac):
+    """Reserve the last fraction of the already shuffled episodes for evaluation."""
+    if not 0 <= val_frac < 1:
+        raise ValueError("val_frac must be in [0, 1)")
+    n_val = round(len(corpus) * val_frac)
+    n_train = len(corpus) - n_val
+    if not n_train:
+        raise ValueError("the split leaves no training episodes")
+    return np.arange(n_train), np.arange(n_train, len(corpus))
