@@ -184,6 +184,8 @@ def run_row(run_dir, anchor=None):
     row = {"combo": run_dir.parent.name, "seed": config.get("seed"), "train_minutes": None, "onnx_mib": None,
            "test_submission_passed": None}
     if config:
+        gpu = (config.get("gpu") or "CPU").replace("NVIDIA ", "").replace("GeForce ", "")
+        row.update(host=config.get("host"), gpu=gpu)
         row.update(train_minutes=round(config["train_seconds"] / 60, 1), onnx_mib=config.get("onnx_mib"),
                    parameters=sum(config["parameters"].values()))
     codes = done.get("eval_exit_codes") or {}
@@ -250,7 +252,9 @@ def write_markdown(per_run, path, has_blend):
     cols = ["top1", "nmse", "encoder_only", "pos_r2"] + (["blend"] if has_blend else []) + \
            ["action_top1_25", "final_mse", "train_minutes", "onnx_mib", "test_submission_passed"]
     cols = [c for c in cols if c in per_run]
-    lines = ["| combination | seeds | " + " | ".join(cols) + " |", "|" + "---|" * (len(cols) + 2)]
+    header = ["train_minutes (min–max)" if c == "train_minutes" else c for c in cols]
+    header += ["node (GPU)"] if "host" in per_run else []
+    lines = ["| combination | seeds | " + " | ".join(header) + " |", "|" + "---|" * (len(header) + 2)]
     for combo, g in per_run.groupby("combo"):
         cells = []
         for c in cols:
@@ -259,10 +263,16 @@ def write_markdown(per_run, path, has_blend):
                 cells.append(f"{int(v.sum())}/{len(v)}" if len(v) else "-")
             elif not len(v):
                 cells.append("-")
+            elif c == "train_minutes":  # training time of one seed: mean, and the fastest and slowest seed
+                cells.append(f"{v.mean():.1f} ({v.min():.1f}–{v.max():.1f})" if len(v) > 1 else f"{v.mean():.1f}")
             else:
                 cells.append(f"{v.mean():.3f} ± {v.std():.3f}" if len(v) > 1 else f"{v.mean():.3f}")
+        if "host" in g:  # where the seeds ran; seeds of one job share a node, a resubmitted job may not
+            places = g[["host", "gpu"]].dropna().drop_duplicates()
+            cells.append(", ".join(f"{h} ({u})" for h, u in places.itertuples(index=False)) or "-")
         lines.append(f"| {combo} | {len(g)} | " + " | ".join(cells) + " |")
-    path.write_text("Mean ± standard deviation across seeds.\n\n" + "\n".join(lines) + "\n")
+    path.write_text("Mean ± standard deviation across seeds; train_minutes is the mean training time of one seed with "
+                    "the fastest and slowest seed in brackets (evaluation not included).\n\n" + "\n".join(lines) + "\n")
 
 
 def training_comparison(combo_dirs, out, smooth):
