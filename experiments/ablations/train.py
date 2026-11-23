@@ -41,7 +41,6 @@ import lewm  # noqa: E402
 from train_lewm import action_stats  # noqa: E402
 
 RESULTS = HERE / "results"
-COMBOS = [f"{e}-{p}-{l}" for e in ("cnn", "vit") for p in ("mlp", "ar") for l in ("ref", "lewm")] + ["vit-mlp1-ref"]
 
 
 def combo_name(encoder, predictor, loss):
@@ -159,7 +158,7 @@ def train_seed(args, seed, run_dir, corpus, train_eps):
     config = {
         "combo": run_dir.parent.name, "encoder": args.encoder, "predictor": args.predictor, "loss": args.loss,
         "seed": seed, "steps": args.steps, "batch_size": args.batch_size, "val_frac": args.val_frac,
-        "train_episodes": len(train_eps), "precision": precision,
+        "train_episodes": len(train_eps), "precision": precision, "loss_weights": models.LOSS_PRESETS[args.loss],
         "optim": {"encoder": models.OPTIM[args.encoder], "predictor": models.OPTIM[args.predictor]},
         "ref_long": models.REF_LONG, "lewm_long": models.LEWM_LONG,
         "parameters": counts, "float32_mib": round(mib, 2), "onnx_mib": round(os.path.getsize(run_dir / "model.onnx") / 2**20, 2),

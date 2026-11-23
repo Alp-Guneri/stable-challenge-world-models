@@ -67,6 +67,42 @@ Use `.venv/bin/python` (or `uv run --no-sync`), not plain `uv run`: `uv run` fir
 slower). Other entry points: `train.py` (one combination, locally or by hand), `anchors.py`, `report.py` (re-plot at any time,
 e.g. `--smooth 1` for raw curves), and `launch.py --dry-run` / `--combos ...` / `--seeds N`.
 
+## Suites and loss presets
+
+`launch.py --suite` picks the list of combinations (`--combos` gives an explicit list instead); both are defined in
+[presets.py](presets.py):
+
+| suite | combinations |
+|---|---|
+| `main` (default) | the encoder × predictor × loss grid above, plus `vit-mlp1-ref` |
+| `loss` | `cnn-mlp` (the best pair in `main`) with every loss preset |
+
+```bash
+# the loss suite; reuses main's finished cnn-mlp-ref, cnn-mlp-lewm and anchors instead of retraining them
+.venv/bin/python experiments/ablations/launch.py --name loss --suite loss --reuse-from main
+```
+
+Every loss is the same weighted sum, `mse·MSE + infonce·InfoNCE(τ) + vcreg·VCReg + vcreg_t·VCReg(within clip) +
+sigreg·SIGReg`; a preset only sets the weights. Combination names split on `-`, so presets use `_`.
+
+| preset | MSE | InfoNCE (τ) | VCReg | VCReg within clip | SIGReg | question |
+|---|---|---|---|---|---|---|
+| `ref` | 25 | 1 (0.1) | 1 | 1 | 0 | the reference loss |
+| `lewm` | 1 | 0 | 0 | 0 | 0.1 | the LeWM loss |
+| `ref_nonce` | 25 | 0 | 1 | 1 | 0 | is InfoNCE what makes the reference loss better? |
+| `ref_novcregt` | 25 | 1 (0.1) | 1 | 0 | 0 | does the within-clip VCReg term matter? |
+| `lewm_nce` | 1 | 1 (0.1) | 0 | 0 | 0.1 | does InfoNCE alone close the gap to `ref`? |
+| `ref_nce2x`, `ref_nce05x` | 25 | 2 / 0.5 (0.1) | 1 | 1 | 0 | is the InfoNCE weight under-tuned? |
+| `ref_tau005`, `ref_tau02` | 25 | 1 (0.05 / 0.2) | 1 | 1 | 0 | is the InfoNCE temperature under-tuned? |
+
+All five terms are computed and logged on every step whatever their weight (weight-0 terms without gradient), so
+every run's curves are comparable; `ref/infonce` is always logged at τ = 0.1, and the temperature presets also log
+`infonce_trained_tau`. `ref` and `lewm` give exactly the losses of the main suite (checked), so runs can be shared
+between suites: `--reuse-from NAME` links each combination that results/NAME finished with the same `--steps` and
+`--seeds` (and its anchors) instead of submitting it. The report adds `training_by_loss_<pair>.png` and
+`top1_by_horizon_by_loss_<pair>.png` for any pair run with 3 or more presets, grouped as in `presets.LOSS_GROUPS`;
+color follows the preset, and the two settings of one knob share a color (solid = higher, dashed = lower).
+
 ## Outputs
 
 `experiments/ablations/results/<name>/` (git-ignored):

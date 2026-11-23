@@ -51,6 +51,7 @@ import torch.nn.functional as F
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # presets.py
 
 import example_train  # noqa: E402
 import lewm  # noqa: E402
@@ -58,7 +59,9 @@ from evaluate import ACTION_DIM, HIST, HORIZON, SKIP  # noqa: E402
 from stable_pretraining.backbone import MLP as SptMLP  # noqa: E402
 
 ACTION_BLOCK = ACTION_DIM * SKIP
-ENCODERS, PREDICTORS, LOSSES = ("cnn", "vit"), ("mlp", "mlp1", "ar"), ("ref", "lewm")
+from presets import LOSS_PRESETS, LOSSES  # noqa: E402  (the loss presets: term weights, see presets.py)
+
+ENCODERS, PREDICTORS = ("cnn", "vit"), ("mlp", "mlp1", "ar")
 
 # The configurations being compared. ref_long = example_train.py defaults; lewm_long = the README's command.
 REF_LONG = dict(dim=256, width=32, hidden=512)
@@ -210,35 +213,49 @@ def effective_rank(x):
 
 
 def loss_terms(model, batch, vcreg, sigreg, loss_name):
-    """All terms of both losses, plus diagnostics. Returns (loss to optimize, dict of scalars to log)."""
+    """The weighted loss of preset `loss_name` (presets.py), plus every term and diagnostic to log.
+
+    All five terms are computed on every step; those with weight 0 are computed without gradient, for logging only.
+    The logged names keep the main ablation's (ref/infonce, ref/vcreg, ref/vcreg_t, lewm/sigreg, and the totals of
+    the two original losses ref/total and lewm/total), so every run's metrics.csv has the same columns.
+    Returns (loss to optimize, dict of scalars to log)."""
+    w = LOSS_PRESETS[loss_name]
     frames = example_train.to_model_frames(batch["frames"])  # [B, HIST + HORIZON, 3, 64, 64]
     emb = model.encoder.embed(frames).float()  # [B, n, D], all embeddings of the sample
     c = model.encoder.context_len
     target = emb[:, c:]  # [B, HORIZON, D]
     pred = model.rollout(emb[:, :c], batch["actions"]).float()  # [B, HORIZON, D]
 
-    mse = (pred - target).square().mean()
+    builders = {
+        "mse": lambda: (pred - target).square().mean(),
+        "infonce": lambda: sum(example_train.info_nce(pred[:, k], target[:, k], w["tau"])
+                               for k in range(HORIZON)) / HORIZON,
+        "vcreg": lambda: vcreg(emb.flatten(0, 1)),
+        "vcreg_t": lambda: vcreg((emb - emb.mean(1, keepdim=True)).flatten(0, 1)),
+        "sigreg": lambda: sigreg(emb.transpose(0, 1)),
+    }
+    values = {}
+    for term, build in builders.items():
+        if w[term]:
+            values[term] = build()
+        else:
+            with torch.no_grad():
+                values[term] = build()
+    loss = sum(w[t] * values[t] for t in builders if w[t])
+
     terms = {}
-
-    def ref_terms():
-        reg = vcreg(emb.flatten(0, 1))
-        reg_t = vcreg((emb - emb.mean(1, keepdim=True)).flatten(0, 1))
-        nce = sum(example_train.info_nce(pred[:, k], target[:, k]) for k in range(HORIZON)) / HORIZON
-        return 25 * mse + reg + reg_t + nce, {"ref/vcreg": reg, "ref/vcreg_t": reg_t, "ref/infonce": nce}
-
-    def lewm_terms():
-        sig = sigreg(emb.transpose(0, 1))
-        return mse + LEWM_LONG["sigreg_weight"] * sig, {"lewm/sigreg": sig}
-
-    builders = {"ref": ref_terms, "lewm": lewm_terms}
-    loss, active = builders[loss_name]()
     with torch.no_grad():
-        other_name = "lewm" if loss_name == "ref" else "ref"
-        other_loss, other = builders[other_name]()
-        terms.update({k: v.detach() for k, v in {**active, **other}.items()})
-        terms[f"{loss_name}/total"] = loss.detach()
-        terms[f"{other_name}/total"] = other_loss.detach()
+        v = {t: x.detach() for t, x in values.items()}
+        ref_nce = v["infonce"] if w["tau"] == 0.1 else sum(  # the original losses' InfoNCE uses temperature 0.1
+            example_train.info_nce(pred[:, k], target[:, k]) for k in range(HORIZON)) / HORIZON
+        if w["tau"] != 0.1:  # the InfoNCE this preset trains, at its own temperature
+            terms["infonce_trained_tau"] = v["infonce"]
+        terms.update({"ref/infonce": ref_nce, "ref/vcreg": v["vcreg"], "ref/vcreg_t": v["vcreg_t"],
+                      "lewm/sigreg": v["sigreg"],
+                      "ref/total": 25 * v["mse"] + v["vcreg"] + v["vcreg_t"] + ref_nce,
+                      "lewm/total": v["mse"] + LEWM_LONG["sigreg_weight"] * v["sigreg"]})
         terms["loss"] = loss.detach()
+        mse = v["mse"]
         terms["mse"] = mse.detach()
         per_k = (pred - target).square().mean((0, 2))
         for k in range(HORIZON):

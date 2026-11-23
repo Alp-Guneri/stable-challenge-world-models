@@ -1,10 +1,13 @@
-"""Submit the whole ablation to Slurm: one job per combination (its seeds run in series inside the job), one job for
-the blend anchors, and one report job that starts when all of them have ended.
+"""Submit a suite of combinations to Slurm: one job per combination (its seeds run in series inside the job), one job
+for the blend anchors, and one report job that starts when all of them have ended.
 
     .venv/bin/python experiments/ablations/launch.py --name smoke --steps 10 --anchor-steps 10   # quick format check
-    .venv/bin/python experiments/ablations/launch.py --name main                                 # the real run
+    .venv/bin/python experiments/ablations/launch.py --name main                                 # encoder x predictor x loss
+    .venv/bin/python experiments/ablations/launch.py --name loss --suite loss --reuse-from main  # CNN-MLP x loss presets
     .venv/bin/python experiments/ablations/launch.py --name main --dry-run                       # print, submit nothing
 
+Suites and loss presets are defined in presets.py; --combos runs an explicit list instead. --reuse-from links
+combinations (and anchors) that another run already finished with the same steps and seeds, instead of retraining.
 Everything goes to experiments/ablations/results/<name>/ (Slurm logs in its slurm/ folder; job ids in jobs.json).
 """
 
@@ -19,8 +22,39 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
-COMBOS = [f"{e}-{p}-{l}" for e in ("cnn", "vit") for p in ("mlp", "ar") for l in ("ref", "lewm")] + ["vit-mlp1-ref"]
+sys.path.insert(0, str(HERE))
+from presets import LOSSES, SUITES  # noqa: E402
+
+ENCODERS, PREDICTORS = ("cnn", "vit"), ("mlp", "mlp1", "ar")  # as models.py (not imported: it loads torch)
 BF16_GPUS = "rtx_a6000|l40|l40s|rtxpro_6000"  # bf16-capable nodes of this cluster (Ampere or newer)
+
+
+def combo(name):
+    """argparse type: '<encoder>-<predictor>-<loss>' with known parts."""
+    parts = name.split("-")
+    if len(parts) != 3 or parts[0] not in ENCODERS or parts[1] not in PREDICTORS or parts[2] not in LOSSES:
+        raise argparse.ArgumentTypeError(f"{name!r}: expected <encoder>-<predictor>-<loss> with encoder in "
+                                         f"{ENCODERS}, predictor in {PREDICTORS}, loss in {LOSSES}")
+    return name
+
+
+def finished(run_dir, seeds, steps):
+    """True if run_dir holds seeds 0..seeds-1, each evaluated (done.json) and trained for `steps` steps."""
+    for s in range(seeds):
+        d = run_dir / f"seed{s}"
+        try:
+            if not (d / "done.json").exists() or json.loads((d / "config.json").read_text())["steps"] != steps:
+                return False
+        except (OSError, ValueError, KeyError):
+            return False
+    return True
+
+
+def link(target, source, dry_run):
+    """results/<name>/<x> -> results/<other>/<x> (relative symlink)."""
+    print(f"reuse: {target.relative_to(HERE)} -> {source.relative_to(HERE)}")
+    if not dry_run and not target.exists():
+        target.symlink_to(Path("..") / source.parent.name / source.name, target_is_directory=True)
 
 
 def submit(sbatch_args, command, dry_run):
@@ -37,8 +71,12 @@ def submit(sbatch_args, command, dry_run):
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--name", required=True, help="results go to experiments/ablations/results/<name>/")
-    p.add_argument("--combos", nargs="+", default=COMBOS, choices=COMBOS, metavar="COMBO",
-                   help=f"default: all {len(COMBOS)}: {' '.join(COMBOS)}")
+    p.add_argument("--suite", choices=SUITES, default="main",
+                   help="; ".join(f"{k}: {' '.join(v)}" for k, v in SUITES.items()))
+    p.add_argument("--combos", nargs="+", type=combo, metavar="COMBO", help="run these instead of the suite")
+    p.add_argument("--reuse-from", metavar="NAME",
+                   help="link combinations and anchors already finished in results/NAME (same --steps and "
+                        "--seeds) instead of training them again")
     p.add_argument("--seeds", type=int, default=3)
     p.add_argument("--steps", type=int, default=32768)
     p.add_argument("--anchor-steps", type=int, default=6000, help="training steps of the blend's reference anchor")
@@ -70,16 +108,30 @@ def main():
     gpu = [] if args.cpu else ["--gres=gpu:1"] + ([f"--constraint={args.constraint}"] if args.constraint else [])
     python = str(ROOT / ".venv" / "bin" / "python")
 
-    jobs = {}
-    for combo in args.combos:
-        enc, pred, loss = combo.split("-")
-        jobs[combo] = submit(common + gpu + [f"--job-name=abl_{combo}", f"--time={args.time}"],
-                             [python, str(HERE / "train.py"), "--encoder", enc, "--predictor", pred, "--loss", loss,
-                              "--seeds", str(args.seeds), "--steps", str(args.steps), "--name", args.name,
-                              "--workers", str(args.workers), "--log-every", str(args.log_every),
-                              "--precision", args.precision]
-                             + (["--skip-eval"] if args.skip_eval else []), args.dry_run)
-    if not (args.no_anchors or args.skip_eval):
+    combos = args.combos or SUITES[args.suite]
+    source = HERE / "results" / args.reuse_from if args.reuse_from else None
+    if source is not None and not source.is_dir():
+        sys.exit(f"--reuse-from: no results at {source}")
+
+    jobs, reused = {}, []
+    for name in combos:
+        if source is not None and finished(source / name, args.seeds, args.steps):
+            link(results / name, source / name, args.dry_run)
+            reused.append(name)
+            continue
+        enc, pred, loss = name.split("-")
+        jobs[name] = submit(common + gpu + [f"--job-name=abl_{name}", f"--time={args.time}"],
+                            [python, str(HERE / "train.py"), "--encoder", enc, "--predictor", pred, "--loss", loss,
+                             "--seeds", str(args.seeds), "--steps", str(args.steps), "--name", args.name,
+                             "--workers", str(args.workers), "--log-every", str(args.log_every),
+                             "--precision", args.precision]
+                            + (["--skip-eval"] if args.skip_eval else []), args.dry_run)
+    anchors_done = source is not None and all((source / "anchors" / a / "proxy.json").exists()
+                                              for a in ("floor", "ref_holdout"))
+    if anchors_done and not (args.no_anchors or args.skip_eval):
+        link(results / "anchors", source / "anchors", args.dry_run)
+        reused.append("anchors")
+    elif not (args.no_anchors or args.skip_eval):
         jobs["anchors"] = submit(common + gpu + ["--job-name=abl_anchors", f"--time={args.anchor_time}"],
                                  [python, str(HERE / "anchors.py"), "--name", args.name, "--steps",
                                   str(args.anchor_steps), "--workers", str(args.workers),
@@ -92,7 +144,10 @@ def main():
                             [python, str(HERE / "report.py"), "--name", args.name], args.dry_run)
 
     if not args.dry_run:
-        (results / "jobs.json").write_text(json.dumps({"jobs": jobs, "args": vars(args)}, indent=2) + "\n")
+        (results / "jobs.json").write_text(json.dumps({"jobs": jobs, "reused": reused, "combos": combos,
+                                                       "args": vars(args)}, indent=2) + "\n")
+    if reused:
+        print(f"\nreused from {args.reuse_from}: {' '.join(reused)}")
     print(f"\n{len(jobs)} jobs {'(dry run, nothing submitted)' if args.dry_run else 'submitted'}; "
           f"results in {results}\nwatch them with: squeue -u $USER -n {','.join('abl_' + c for c in jobs)}")
 
