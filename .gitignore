@@ -5,3 +5,10 @@ eval_data/
 *.zip
 *.onnx
 !example_submission/model.onnx
+slurm_logs/
+runs/
+# ablation results: ignore everything except each run's report/ folder
+# (directories are un-ignored so git can descend into them; files stay ignored unless under a report/)
+experiments/ablations/results/**
+!experiments/ablations/results/**/
+!experiments/ablations/results/**/report/**
