@@ -1,0 +1,116 @@
+{
+  "analysis_clips_by_env": {
+    "1": 1515,
+    "2": 1484
+  },
+  "heldout_clips_by_env": {
+    "1": 185,
+    "2": 148
+  },
+  "example_trainer_draw_share_by_env": {
+    "1": 0.510204,
+    "2": 0.489796
+  },
+  "env1_first_frames_max_pixel_difference_away_from_dot": 0,
+  "env2_first_frames_max_pixel_difference_away_from_dot": 3,
+  "env1_visited_px": 982,
+  "env1_holes_in_visited_px": 0,
+  "env2_visited_px": 2750,
+  "env2_holes_in_visited_px": 0,
+  "env2_frames_with_dot_centre_inside_wall": 0,
+  "env2_frames_total_tracked": 74170,
+  "env1_1frame_move_r2_from_single_action_at_lag": {
+    "-3": 0.05263,
+    "-2": 0.079996,
+    "-1": 0.10891,
+    "0": 0.021553,
+    "1": -0.000369,
+    "2": -0.000375,
+    "3": -0.00036
+  },
+  "env1_both_rule_by_wall_contact": {
+    "1": {
+      "never_touches": {
+        "r2": 0.699952,
+        "rms_error_px": 0.868505,
+        "rms_spread_px": 1.585609
+      },
+      "touches": {
+        "r2": 0.41847,
+        "rms_error_px": 1.005077,
+        "rms_spread_px": 1.318061
+      }
+    },
+    "5": {
+      "never_touches": {
+        "r2": 0.626816,
+        "rms_error_px": 4.180266,
+        "rms_spread_px": 6.843076
+      },
+      "touches": {
+        "r2": 0.47515,
+        "rms_error_px": 4.598217,
+        "rms_spread_px": 6.34746
+      }
+    },
+    "10": {
+      "never_touches": {
+        "r2": 0.507255,
+        "rms_error_px": 8.092543,
+        "rms_spread_px": 11.529044
+      },
+      "touches": {
+        "r2": 0.431379,
+        "rms_error_px": 8.543045,
+        "rms_spread_px": 11.329963
+      }
+    }
+  },
+  "env2_1frame_move_r2_from_single_action_at_lag": {
+    "-3": 0.163797,
+    "-2": 0.225996,
+    "-1": 0.309855,
+    "0": 0.499833,
+    "1": 0.326299,
+    "2": 0.25961,
+    "3": 0.205486
+  },
+  "env2_both_rule_by_wall_contact": {
+    "1": {
+      "never_touches": {
+        "r2": 0.795035,
+        "rms_error_px": 0.933394,
+        "rms_spread_px": 2.061885
+      },
+      "touches": {
+        "r2": 0.329983,
+        "rms_error_px": 0.926582,
+        "rms_spread_px": 1.132004
+      }
+    },
+    "5": {
+      "never_touches": {
+        "r2": 0.78566,
+        "rms_error_px": 4.14094,
+        "rms_spread_px": 8.946971
+      },
+      "touches": {
+        "r2": 0.494594,
+        "rms_error_px": 3.569801,
+        "rms_spread_px": 5.021471
+      }
+    },
+    "10": {
+      "never_touches": {
+        "r2": 0.744817,
+        "rms_error_px": 7.983524,
+        "rms_spread_px": 15.80405
+      },
+      "touches": {
+        "r2": 0.545567,
+        "rms_error_px": 6.524701,
+        "rms_spread_px": 9.678898
+      }
+    }
+  }
+}
