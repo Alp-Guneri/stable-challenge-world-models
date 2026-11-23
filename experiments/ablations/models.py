@@ -59,9 +59,7 @@ from evaluate import ACTION_DIM, HIST, HORIZON, SKIP  # noqa: E402
 from stable_pretraining.backbone import MLP as SptMLP  # noqa: E402
 
 ACTION_BLOCK = ACTION_DIM * SKIP
-from presets import LOSS_PRESETS, LOSSES  # noqa: E402  (the loss presets: term weights, see presets.py)
-
-ENCODERS, PREDICTORS = ("cnn", "vit"), ("mlp", "mlp1", "ar")
+from presets import ENCODER_VARIANTS, ENCODERS, LOSS_PRESETS, LOSSES, PREDICTORS, vit_config  # noqa: E402,F401
 
 # The configurations being compared. ref_long = example_train.py defaults; lewm_long = the README's command.
 REF_LONG = dict(dim=256, width=32, hidden=512)
@@ -69,12 +67,12 @@ LEWM_LONG = dict(dim=96, heads=4, dim_head=24, patch=8, enc_depth=6, enc_mlp=384
                  proj_hidden=384, pred_dropout=0.1, sigreg_weight=0.1)
 
 # Optimizer settings belong to the network, not to the loss: each network keeps those of the model it comes from.
+REF_OPTIM = dict(lr=1e-3, weight_decay=1e-4, schedule="cosine", clip=None)  # example_train.py
+LEWM_OPTIM = dict(lr=2e-4, weight_decay=1e-3, schedule="warmup_cosine", clip=1.0)  # train_lewm.py
 OPTIM = {
-    "cnn": dict(lr=1e-3, weight_decay=1e-4, schedule="cosine", clip=None),  # example_train.py
-    "mlp": dict(lr=1e-3, weight_decay=1e-4, schedule="cosine", clip=None),
-    "mlp1": dict(lr=1e-3, weight_decay=1e-4, schedule="cosine", clip=None),
-    "vit": dict(lr=2e-4, weight_decay=1e-3, schedule="warmup_cosine", clip=1.0),  # train_lewm.py
-    "ar": dict(lr=2e-4, weight_decay=1e-3, schedule="warmup_cosine", clip=1.0),
+    "cnn": REF_OPTIM, "mlp": REF_OPTIM, "mlp1": REF_OPTIM, "ar": LEWM_OPTIM,
+    # every ViT variant keeps LeWM's settings, except the learning rate when that is the variant's one change
+    **{name: {**LEWM_OPTIM, "lr": vit_config(name)["lr"]} for name in ENCODER_VARIANTS},
 }
 
 
@@ -94,19 +92,126 @@ class CNNEncoder(nn.Module):
         return self.net(windows.flatten(0, 1)).view(b, t - HIST + 1, -1)
 
 
-class ViTEncoder(nn.Module):
+# The ViT family (presets.ENCODER_VARIANTS). "vit" is exactly lewm_long's encoder: D = 96, 6 layers, 4 heads of 24,
+# transformer MLP 384, 8x8 patches, BatchNorm projector 96 -> 384 -> 96 (same structure and parameter count as the
+# main suite's ViT). D sets every width: head size D/4, transformer MLP and projector hidden 4D.
+#
+# Attention: these encoders use PyTorch's scaled_dot_product_attention, the same computation as lewm.Attention's
+# explicit softmax(QK^T/sqrt(d))V (checked numerically equal), but without materializing the attention matrix: with
+# 4x4 patches (257 tokens per frame) the explicit matrices would need ~1 GB per layer per batch, more than the 8 GB
+# GPUs have. It exports to ONNX at opset 17. Encoder attention is never causal: all its frames are at or before t.
+
+class SDPAttention(lewm.Attention):
+    """lewm.Attention with the same parameters, computed by scaled_dot_product_attention."""
+
+    def forward(self, x):
+        b, t, _ = x.shape
+        qkv = self.to_qkv(self.norm(x)).view(b, t, 3, self.heads, -1).permute(2, 0, 3, 1, 4)
+        out = F.scaled_dot_product_attention(qkv[0], qkv[1], qkv[2], is_causal=self.causal,
+                                             dropout_p=self.drop.p if self.training else 0.0)
+        return self.to_out(out.transpose(1, 2).reshape(b, t, -1))
+
+
+def vit_backbone(cfg, in_chans=3):
+    """lewm.ViTEncoder with cfg's width and patch size (and in_chans input channels), on SDPA attention."""
+    d = cfg["dim"]
+    net = lewm.ViTEncoder(d, cfg["depth"], cfg["heads"], d // cfg["heads"], 4 * d, cfg["patch"])
+    if in_chans != 3:
+        net.patch_embed = nn.Conv2d(in_chans, d, cfg["patch"], stride=cfg["patch"])
+    for m in net.modules():
+        if type(m) is lewm.Attention:
+            m.__class__ = SDPAttention
+    return net
+
+
+def projector(cfg):
+    """LeWM's projector MLP (D -> 4D -> D), with BatchNorm (LeWM) or LayerNorm in the hidden layer."""
+    d = cfg["dim"]
+    if cfg["proj_norm"] == "batch":
+        return lewm.MLP(d, 4 * d)
+    return nn.Sequential(nn.Linear(d, 4 * d), nn.LayerNorm(4 * d), nn.GELU(), nn.Linear(4 * d, d))
+
+
+class FrameViT(nn.Module):
+    """input = frame: LeWM's encoder, one embedding per frame; the context is the 3 frame embeddings."""
+
     context_len = HIST
 
-    def __init__(self):
+    def __init__(self, cfg):
         super().__init__()
-        c = LEWM_LONG
-        self.dim = c["dim"]
-        self.net = lewm.ViTEncoder(c["dim"], c["enc_depth"], c["heads"], c["dim_head"], c["enc_mlp"], c["patch"])
-        self.projector = lewm.MLP(c["dim"], c["proj_hidden"])
+        self.dim = cfg["dim"]
+        self.net = vit_backbone(cfg)
+        self.projector = projector(cfg)
 
     def embed(self, frames):
         b, t = frames.shape[:2]
         return self.projector(self.net(frames.flatten(0, 1))).view(b, t, -1)
+
+
+class StackViT(nn.Module):
+    """input = stack: the HIST frames as one 3*HIST-channel image -> 64 patch tokens (each covers its square in all
+    frames) + CLS -> one embedding of the clip."""
+
+    def __init__(self, cfg):
+        super().__init__()
+        self.vit = vit_backbone(cfg, in_chans=3 * HIST)
+
+    def forward(self, clips):
+        """clips [N, HIST, 3, S, S] in [0, 1] -> [N, D]."""
+        v = self.vit
+        x = ((clips - v.mean.unsqueeze(1)) / v.std.unsqueeze(1)).flatten(1, 2)  # per-frame ImageNet normalization
+        x = v.patch_embed(x).flatten(2).transpose(1, 2)
+        x = torch.cat([v.cls_token.expand(x.shape[0], -1, -1), x], 1) + v.pos_embedding
+        for block in v.blocks:
+            x = block(x)
+        return v.norm(x)[:, 0]
+
+
+class SpaceTimeViT(nn.Module):
+    """input = spacetime: one token per patch per frame (HIST x 64), each with the patch's spatial embedding plus its
+    frame's temporal embedding, + CLS; attention across space and time -> one embedding of the clip."""
+
+    def __init__(self, cfg):
+        super().__init__()
+        self.vit = vit_backbone(cfg)  # patch embedding shared by the frames; its pos_embedding is the spatial one
+        self.time_embedding = nn.Parameter(torch.zeros(1, HIST, 1, cfg["dim"]))
+        nn.init.trunc_normal_(self.time_embedding, std=0.02)
+
+    def forward(self, clips):
+        """clips [N, HIST, 3, S, S] in [0, 1] -> [N, D]."""
+        v, n = self.vit, clips.shape[0]
+        x = (clips.flatten(0, 1) - v.mean) / v.std
+        x = v.patch_embed(x).flatten(2).transpose(1, 2)  # [N*HIST, P, D]
+        x = x.view(n, HIST, -1, x.shape[-1]) + v.pos_embedding[:, 1:].unsqueeze(1) + self.time_embedding
+        cls = v.cls_token.expand(n, -1, -1) + v.pos_embedding[:, :1]
+        x = torch.cat([cls, x.flatten(1, 2)], 1)  # [N, 1 + HIST*P, D]
+        for block in v.blocks:
+            x = block(x)
+        return v.norm(x)[:, 0]
+
+
+class ClipViT(nn.Module):
+    """input = stack or spacetime: one embedding per sliding window of HIST frames, like the CNN (context_len 1)."""
+
+    context_len = 1
+
+    def __init__(self, cfg):
+        super().__init__()
+        self.dim = cfg["dim"]
+        self.net = StackViT(cfg) if cfg["input"] == "stack" else SpaceTimeViT(cfg)
+        self.projector = projector(cfg)
+
+    def embed(self, frames):
+        b, t = frames.shape[:2]
+        windows = torch.stack([frames[:, k : k + HIST] for k in range(t - HIST + 1)], 1)
+        return self.projector(self.net(windows.flatten(0, 1))).view(b, t - HIST + 1, -1)
+
+
+def make_encoder(name):
+    if name == "cnn":
+        return CNNEncoder()
+    cfg = vit_config(name)
+    return FrameViT(cfg) if cfg["input"] == "frame" else ClipViT(cfg)
 
 
 # -------------------------------------------------------------------------------------------------- predictors
@@ -171,7 +276,7 @@ class WorldModel(nn.Module):
 
     def __init__(self, encoder: str, predictor: str):
         super().__init__()
-        self.encoder = CNNEncoder() if encoder == "cnn" else ViTEncoder()
+        self.encoder = make_encoder(encoder)
         dim = self.encoder.dim
         if predictor == "ar":
             self.predictor = ARPredictor(dim)

@@ -44,8 +44,11 @@ import presets  # noqa: E402
 # Reference categorical palette, slots 1-8 (fixed order, never cycled).
 PALETTE = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"]
 # Encoder-predictor pairs in a fixed order, each with a fixed color (slots 1-5).
-ARCHS = ["cnn-mlp", "cnn-ar", "vit-mlp", "vit-ar", "vit-mlp1"]
-COLORS = dict(zip(ARCHS, PALETTE))
+ARCHS = presets.MAIN_ARCHS  # the main suite's pairs, in its figures' order
+# Each pair's color and line style (presets.ARCH_STYLE); e.g. vit-mlp1 is vit-mlp's color, dashed (same encoder).
+ARCH_COLORS = {k: PALETTE[slot - 1] for k, (slot, _) in presets.ARCH_STYLE.items()}
+ARCH_LINES = {k: style for k, (_, style) in presets.ARCH_STYLE.items()}
+COLORS = ARCH_COLORS
 LOSSES = ["ref", "lewm"]  # the two original losses: the encoder x predictor figures compare these
 LOSS_TITLE = {"ref": "Reference loss (MSE + VCReg + InfoNCE)", "lewm": "LeWM loss (MSE + SIGReg)"}
 # Each loss preset's color and line style in the per-loss figures (presets.LOSS_STYLE).
@@ -144,7 +147,7 @@ def combo_report(combo_dir, smooth=None):
     frames = [load_metrics(r) for r in runs]
     smooth = smooth or default_smooth(frames)
     arch, loss = split(combo_dir.name)
-    color = COLORS.get(arch, COLORS["cnn-mlp"])
+    color = ARCH_COLORS.get(arch, PALETTE[0])
     columns = [c for c, _ in PANELS] + sorted({c for f in frames for c in f.columns} - {c for c, _ in PANELS})
     titles = dict(PANELS)
     curves = [(c, band(frames, c, smooth)) for c in columns]
@@ -256,12 +259,14 @@ def report(results_dir, smooth=None):
     summary.to_csv(out / "summary.csv")
     write_markdown(per_run, out / "summary.md", anchor is not None)
     names = [d.name for d in combo_dirs]
-    if len({split(c)[0] for c in names}) > 1:  # several encoder-predictor pairs: compare them per original loss
+    pairs = {split(c)[0] for c in names}
+    if len(pairs) > 1 and pairs <= set(ARCHS):  # the main suite's pairs: compare them per original loss
         training_comparison(combo_dirs, out, smooth)
         horizon_comparison(per_run, out)
+    for loss, archs in arch_suites(names).items():  # pairs beyond the main suite's (encoder suite): grouped
+        by_arch_figures(loss, archs, combo_dirs, per_run, out, smooth)
     for arch, losses in loss_suites(names).items():  # one pair with many loss presets: compare the losses
-        training_by_loss(arch, losses, combo_dirs, out, smooth)
-        horizon_by_loss(arch, losses, per_run, out)
+        by_loss_figures(arch, losses, combo_dirs, per_run, out, smooth)
     eval_comparison(per_run, out)
     print(f"wrote {out}")
 
@@ -309,14 +314,14 @@ def training_comparison(combo_dirs, out, smooth):
                 frames = data.get(f"{arch}-{loss}")
                 curve = band(frames, column, smooth) if frames else None
                 if curve is not None:
-                    draw(ax, curve, COLORS[arch], label=arch)
+                    draw(ax, curve, COLORS[arch], label=arch, linestyle=ARCH_LINES[arch])
                     curves.append(curve)
             if curves:
                 autoscale(ax, curves)
             ax.set_title(f"{titles[column]}" if row else f"{LOSS_TITLE[loss]}\n{titles[column]}")
             if row == len(KEY_PANELS) - 1:
                 ax.set_xlabel("step")
-    handles = [plt.Line2D([], [], color=COLORS[a], label=a) for a in ARCHS]
+    handles = [plt.Line2D([], [], color=COLORS[a], linestyle=ARCH_LINES[a], label=a) for a in ARCHS]
     fig.legend(handles=handles, loc="upper left", ncol=len(ARCHS), bbox_to_anchor=(0.01, 0.995))
     fig.text(0.99, 0.995, f"mean of seeds, band = min to max, rolling mean over {smooth} step(s)", ha="right",
              va="top", color=INK2)
@@ -337,7 +342,7 @@ def order(combos):
 def combo_color(combo, single_arch):
     """Color by encoder-predictor pair; by loss preset when every combination shares one pair."""
     arch, loss = split(combo)
-    return LOSS_COLORS.get(loss, INK2) if single_arch else COLORS.get(arch, INK2)
+    return LOSS_COLORS.get(loss, INK2) if single_arch else ARCH_COLORS.get(arch, INK2)
 
 
 def loss_suites(combos):
@@ -349,37 +354,49 @@ def loss_suites(combos):
     return {a: ls for a, ls in by_arch.items() if len(ls) >= 3}
 
 
-def groups_for(losses):
-    """presets.LOSS_GROUPS restricted to the losses present (empty groups dropped); ungrouped losses get their own."""
-    groups = {t: [l for l in ls if l in losses] for t, ls in presets.LOSS_GROUPS.items()}
-    groups = {t: ls for t, ls in groups.items() if len(ls) > 1}
-    rest = [l for l in losses if not any(l in ls for ls in groups.values())]
+def arch_suites(combos):
+    """{loss: pairs present} for every loss run with 2 or more encoder-predictor pairs, when some pair is outside the
+    main suite's five (e.g. the encoder suite); the main suite has its own figures (training_comparison)."""
+    by_loss = {}
+    for c in combos:
+        arch, loss = split(c)
+        by_loss.setdefault(loss, []).append(arch)
+    if all(a in ARCHS for archs in by_loss.values() for a in archs):
+        return {}
+    return {l: archs for l, archs in by_loss.items() if len(archs) >= 2}
+
+
+def groups_for(present, preset_groups, other="Other"):
+    """preset_groups restricted to the series present (groups with fewer than 2 dropped); the rest in `other`."""
+    groups = {t: [x for x in xs if x in present] for t, xs in preset_groups.items()}
+    groups = {t: xs for t, xs in groups.items() if len(xs) > 1}
+    rest = [x for x in present if not any(x in xs for xs in groups.values())]
     if rest:
-        groups["Other losses"] = rest
+        groups[other] = rest
     return groups
 
 
-def training_by_loss(arch, losses, combo_dirs, out, smooth):
-    """One column per loss group, one line per loss: key training metrics for one encoder-predictor pair."""
-    dirs = {split(d.name)[1]: d for d in combo_dirs if split(d.name)[0] == arch}
-    data = {l: [load_metrics(r) for r in seed_dirs(dirs[l])] for l in losses if l in dirs}
-    data = {l: v for l, v in data.items() if v}
-    if not data:
+def grouped_training(series, groups, colors, lines, title, filename, out, smooth):
+    """Key training metrics: one column per group, one line per series. series: {label: combination folder}."""
+    data = {k: [load_metrics(r) for r in seed_dirs(d)] for k, d in series.items()}
+    data = {k: v for k, v in data.items() if v}
+    groups = {t: [x for x in xs if x in data] for t, xs in groups.items()}
+    groups = {t: xs for t, xs in groups.items() if xs}
+    if not groups:
         return
     smooth = smooth or max(default_smooth(v) for v in data.values())
-    groups = groups_for(list(data))
     panels = KEY_PANELS
-    fig, axes = plt.subplots(len(panels), len(groups), figsize=(5.5 * len(groups), 2.6 * len(panels)),
+    fig, axes = plt.subplots(len(panels), len(groups), figsize=(5 * len(groups), 2.6 * len(panels)),
                              sharey="row", squeeze=False)
     titles = dict(PANELS)
     for col, (group, members) in enumerate(groups.items()):
         for row, column in enumerate(panels):
             ax = axes[row, col]
             curves = []
-            for loss in members:
-                curve = band(data[loss], column, smooth)
+            for key in members:
+                curve = band(data[key], column, smooth)
                 if curve is not None:
-                    draw(ax, curve, LOSS_COLORS.get(loss, INK2), label=loss, linestyle=LOSS_LINES.get(loss, "-"))
+                    draw(ax, curve, colors.get(key, INK2), label=key, linestyle=lines.get(key, "-"))
                     curves.append(curve)
             if curves:
                 autoscale(ax, curves)
@@ -388,39 +405,60 @@ def training_by_loss(arch, losses, combo_dirs, out, smooth):
                 ax.legend(loc="best", fontsize=7.5)
             if row == len(panels) - 1:
                 ax.set_xlabel("step")
-    fig.suptitle(f"{arch}: loss presets (mean of seeds, band = min to max, rolling mean over {smooth} step(s))",
+    fig.suptitle(f"{title} (mean of seeds, band = min to max, rolling mean over {smooth} step(s))",
                  x=0.01, ha="left", fontsize=11)
     fig.tight_layout(rect=(0, 0, 1, 0.98))
-    fig.savefig(out / f"training_by_loss_{arch}.png", dpi=110)
+    fig.savefig(out / filename, dpi=110)
     plt.close(fig)
 
 
-def horizon_by_loss(arch, losses, per_run, out):
+def grouped_horizon(series, groups, colors, lines, title, filename, per_run, out):
+    """Held-out top-1 by horizon: one panel per group, one line per series. series: {label: combination name}."""
     cols = [f"top1_k{k}" for k in range(1, 6)]
     if not all(c in per_run for c in cols):
         return
-    groups = groups_for([l for l in losses if (per_run["combo"] == f"{arch}-{l}").any()])
+    rows = {k: per_run[per_run["combo"] == c][cols].dropna() for k, c in series.items()}
+    rows = {k: g for k, g in rows.items() if not g.empty}
+    groups = {t: [x for x in xs if x in rows] for t, xs in groups.items()}
+    groups = {t: xs for t, xs in groups.items() if xs}
     if not groups:
         return
-    fig, axes = plt.subplots(1, len(groups), figsize=(5.5 * len(groups), 3.6), sharey=True, squeeze=False)
+    fig, axes = plt.subplots(1, len(groups), figsize=(5 * len(groups), 3.6), sharey=True, squeeze=False)
     x = np.arange(1, 6) * 5
     for ax, (group, members) in zip(axes[0], groups.items()):
-        for loss in members:
-            g = per_run[per_run["combo"] == f"{arch}-{loss}"][cols].dropna()
-            if g.empty:
-                continue
-            color = LOSS_COLORS.get(loss, INK2)
+        for key in members:
+            g, color = rows[key], colors.get(key, INK2)
             ax.fill_between(x, g.min().to_numpy(), g.max().to_numpy(), color=color, alpha=0.15, linewidth=0)
-            ax.plot(x, g.mean().to_numpy(), marker="o", linestyle=LOSS_LINES.get(loss, "-"), color=color,
-                    markersize=4, label=loss)
-        ax.set_title(f"{arch}: {group}")
+            ax.plot(x, g.mean().to_numpy(), marker="o", linestyle=lines.get(key, "-"), color=color, markersize=4,
+                    label=key)
+        ax.set_title(f"{title}: {group}")
         ax.set_xlabel("environment steps ahead")
         ax.set_xticks(x)
         ax.legend(loc="upper right", fontsize=7.5)
     axes[0, 0].set_ylabel("held-out retrieval top-1")
     fig.tight_layout()
-    fig.savefig(out / f"top1_by_horizon_by_loss_{arch}.png", dpi=110)
+    fig.savefig(out / filename, dpi=110)
     plt.close(fig)
+
+
+def by_loss_figures(arch, losses, combo_dirs, per_run, out, smooth):
+    """One encoder-predictor pair, many loss presets (e.g. the loss suite)."""
+    groups = groups_for(losses, presets.LOSS_GROUPS, "Other losses")
+    dirs = {split(d.name)[1]: d for d in combo_dirs if split(d.name)[0] == arch}
+    grouped_training({l: dirs[l] for l in losses if l in dirs}, groups, LOSS_COLORS, LOSS_LINES,
+                     f"{arch}: loss presets", f"training_by_loss_{arch}.png", out, smooth)
+    grouped_horizon({l: f"{arch}-{l}" for l in losses}, groups, LOSS_COLORS, LOSS_LINES, arch,
+                    f"top1_by_horizon_by_loss_{arch}.png", per_run, out)
+
+
+def by_arch_figures(loss, archs, combo_dirs, per_run, out, smooth):
+    """One loss, many encoder-predictor pairs beyond the main suite's (e.g. the encoder suite)."""
+    groups = groups_for(archs, presets.ARCH_GROUPS, "Other encoder-predictor pairs")
+    dirs = {split(d.name)[0]: d for d in combo_dirs if split(d.name)[1] == loss}
+    grouped_training({a: dirs[a] for a in archs if a in dirs}, groups, ARCH_COLORS, ARCH_LINES,
+                     f"loss {loss}: encoder-predictor pairs", f"training_by_arch_{loss}.png", out, smooth)
+    grouped_horizon({a: f"{a}-{loss}" for a in archs}, groups, ARCH_COLORS, ARCH_LINES, f"loss {loss}",
+                    f"top1_by_horizon_by_arch_{loss}.png", per_run, out)
 
 
 def eval_comparison(per_run, out):
@@ -464,7 +502,8 @@ def horizon_comparison(per_run, out):
             if g.empty:
                 continue
             ax.fill_between(x, g.min().to_numpy(), g.max().to_numpy(), color=COLORS[arch], alpha=0.18, linewidth=0)
-            ax.plot(x, g.mean().to_numpy(), "-o", color=COLORS[arch], markersize=4, label=arch)
+            ax.plot(x, g.mean().to_numpy(), marker="o", linestyle=ARCH_LINES[arch], color=COLORS[arch], markersize=4,
+                    label=arch)
         ax.set_title(LOSS_TITLE[loss])
         ax.set_xlabel("environment steps ahead")
         ax.set_xticks(x)

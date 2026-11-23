@@ -23,9 +23,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 sys.path.insert(0, str(HERE))
-from presets import LOSSES, SUITES  # noqa: E402
-
-ENCODERS, PREDICTORS = ("cnn", "vit"), ("mlp", "mlp1", "ar")  # as models.py (not imported: it loads torch)
+from presets import ENCODERS, LOSSES, PREDICTORS, SUITES  # noqa: E402
 BF16_GPUS = "rtx_a6000|l40|l40s|rtxpro_6000"  # bf16-capable nodes of this cluster (Ampere or newer)
 
 

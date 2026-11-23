@@ -76,6 +76,7 @@ e.g. `--smooth 1` for raw curves), and `launch.py --dry-run` / `--combos ...` / 
 |---|---|
 | `main` (default) | the encoder × predictor × loss grid above, plus `vit-mlp1-ref` |
 | `loss` | `cnn-mlp` (the best pair in `main`) with every loss preset |
+| `encoder` | every ViT variant with the MLP predictor and the reference loss, plus `cnn-mlp-ref`, `vit-mlp-ref`, `vit-mlp1-ref` (see [Encoder suite](#encoder-suite)) |
 
 ```bash
 # the loss suite; reuses main's finished cnn-mlp-ref, cnn-mlp-lewm and anchors instead of retraining them
@@ -102,6 +103,48 @@ between suites: `--reuse-from NAME` links each combination that results/NAME fin
 `--seeds` (and its anchors) instead of submitting it. The report adds `training_by_loss_<pair>.png` and
 `top1_by_horizon_by_loss_<pair>.png` for any pair run with 3 or more presets, grouped as in `presets.LOSS_GROUPS`;
 color follows the preset, and the two settings of one knob share a color (solid = higher, dashed = lower).
+
+## Encoder suite
+
+Why does the ViT reach ~22% held-out top-1 where the CNN reaches 73%? The two differ in how the frames enter (the
+CNN sees the 3 frames stacked together; LeWM's ViT embeds each frame on its own) and in the architecture. Every
+variant here changes one thing from `vit`, everything else as `lewm_long`, with the MLP predictor and the reference
+loss (the best pair and loss in `main`; the ViT barely reacted to the loss there):
+
+```bash
+.venv/bin/python experiments/ablations/launch.py --name encoder --suite encoder --reuse-from main --time 3-00:00:00
+```
+
+| encoder | change from `vit` | tokens per clip | question |
+|---|---|---|---|
+| `vit` (baseline, reused) | LeWM's per-frame ViT: D 96, 6 layers, 4 heads, 8×8 patches, BatchNorm projector, lr 2e-4 | 3 × 65 | |
+| `vitstack` | the 3 frames stacked as 9 channels before the patches; one embedding of the clip | 65 | is seeing the frames together what the CNN has? |
+| `vitst` | one token per patch per frame + temporal embeddings, joint space-time attention; one embedding of the clip | 193 | does attention across frames add to that? |
+| `vit_lr5e5`, `vit_lr1e3` | encoder learning rate 5e-5 (LeWM authors' default) / 1e-3 (the CNN's) | 3 × 65 | is 2e-4 a good rate? (also removes the CNN-ViT rate difference) |
+| `vit_p4`, `vit_p16` | 4×4 / 16×16 patches | 3 × 257 / 3 × 17 | does an 8×8 patch blur the agent? |
+| `vit_d192`, `vit_d48` | embedding size 192 / 48 (heads stay 4; head size, MLP and projector widths scale with D) | 3 × 65 | is D = 96 too little capacity? |
+| `vit_ln` | LayerNorm instead of BatchNorm in the projector | 3 × 65 | does the BatchNorm projector hurt? |
+
+Controls, reused from `main` by `--reuse-from main`: `vit-mlp-ref` (the baseline every variant is compared with),
+`cnn-mlp-ref` (the target: how much of the 22% → 73% gap a variant closes) and `vit-mlp1-ref` (the per-frame ViT
+with no predictor history). The clip encoders (`vitstack`, `vitst`) give one embedding per 3-frame window, like the
+CNN, so their MLP predictor sees one embedding (exactly the reference predictor); the per-frame variants give 3, and
+the MLP sees all 3 (the history MLP of `vit-mlp`). Variants and their settings are in `presets.ENCODER_VARIANTS`.
+
+Notes:
+- `vit` is exactly `main`'s ViT (same parameter count, outputs equal given the same weights). The ViT encoders now
+  compute attention with PyTorch's `scaled_dot_product_attention`, the same computation as LeWM's explicit
+  softmax(QK^T/√d)V without storing the attention matrix: with 4×4 patches that matrix would need ~1 GB per layer
+  per batch, more than the 8 GB GTX 1080s jobs often land on. Encoder attention is never causal.
+- Cost: `vit_p4` is ~5× and `vitst` ~2–3× the baseline's training time, so allow `--time 3-00:00:00`. All variants
+  pass `test_submission.py`; `vit_p4` takes ~2 min of the 4-minute CPU evaluation budget (on a 24-core node), so it
+  is a diagnostic rather than a submission candidate as is.
+- At lr 5e-5, 32,768 steps may not be enough to converge: check its curves for a plateau before reading its result.
+- Report: `training_by_arch_ref.png` and `top1_by_horizon_by_arch_ref.png`, one panel per question
+  (`presets.ARCH_GROUPS`), each with the CNN target and the ViT baseline. The two settings of one knob share a color
+  (solid = larger value, dashed = smaller); `vit-mlp1` is `vit-mlp`'s color, dashed (same encoder).
+- If a clip encoder clearly wins, the settings sweep is worth repeating on it: what helps a per-frame ViT need not
+  transfer.
 
 ## Outputs
 
