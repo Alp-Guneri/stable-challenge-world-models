@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import math
 from pathlib import Path
 
@@ -36,6 +37,7 @@ import pandas as pd  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 RESULTS = HERE / "results"
+log = logging.getLogger("ablations.report")
 import sys  # noqa: E402
 
 sys.path.insert(0, str(HERE))
@@ -141,6 +143,12 @@ def default_smooth(frames):
     return max(1, steps // 200)
 
 
+def save(fig, path):
+    fig.savefig(path, dpi=110)
+    plt.close(fig)
+    log.info("  wrote %s", path)
+
+
 def combo_report(combo_dir, smooth=None):
     combo_dir = Path(combo_dir)
     runs = seed_dirs(combo_dir)
@@ -171,8 +179,7 @@ def combo_report(combo_dir, smooth=None):
                  f"rolling mean over {smooth} step(s)", x=0.01, ha="left", fontsize=11)
     fig.tight_layout(rect=(0, 0, 1, 0.98))
     (combo_dir / "plots").mkdir(exist_ok=True)
-    fig.savefig(combo_dir / "plots" / "training.png", dpi=110)
-    plt.close(fig)
+    save(fig, combo_dir / "plots" / "training.png")
     rows = [run_row(r) for r in runs]
     (combo_dir / "summary.json").write_text(json.dumps({"runs": rows, "mean": aggregate(rows)}, indent=2,
                                                        default=_json) + "\n")
@@ -246,20 +253,25 @@ def report(results_dir, smooth=None, arch_style=None, arch_groups=None, combo_or
     """arch_style ({pair: (slot, line style)}), arch_groups ({panel title: [pairs]}) and combo_order (combination
     names, in the order of the bar chart) let another experiment draw its own pairs (experiments/predictor_history);
     by default they come from presets.py."""
+    logging.basicConfig(level=logging.INFO, format="%(message)s")  # no-op if the caller configured logging
     results_dir = Path(results_dir)
+    log.info("report for %s", results_dir)
     colors = {**ARCH_COLORS, **{k: PALETTE[slot - 1] for k, (slot, _) in (arch_style or {}).items()}}
     lines = {**ARCH_LINES, **{k: style for k, (_, style) in (arch_style or {}).items()}}
     combo_dirs = sorted(d for d in results_dir.iterdir() if d.is_dir() and d.name.count("-") == 2)
     for d in combo_dirs:
+        if not seed_dirs(d):
+            log.warning("skipped %s: no seed has a metrics.csv yet", d.name)
         combo_report(d, smooth)
     out = results_dir / "report"
     out.mkdir(exist_ok=True)
     anchor = anchors(results_dir)
     rows = [run_row(r, anchor) for d in combo_dirs for r in seed_dirs(d)]
     if not rows:
-        print(f"no finished runs under {results_dir}")
+        log.warning("no finished runs under %s", results_dir)
         return
     per_run = pd.DataFrame(rows)
+    log_added(per_run, combo_order)
     per_run.to_csv(out / "per_run.csv", index=False)
     numeric = per_run.select_dtypes("number").columns.drop("seed", errors="ignore")
     summary = per_run.groupby("combo")[list(numeric)].agg(["mean", "std", "count"])
@@ -276,7 +288,20 @@ def report(results_dir, smooth=None, arch_style=None, arch_groups=None, combo_or
     for arch, losses in loss_suites(names).items():  # one pair with many loss presets: compare the losses
         by_loss_figures(arch, losses, combo_dirs, per_run, out, smooth)
     eval_comparison(per_run, out, colors, combo_order)
-    print(f"wrote {out}")
+    log.info("wrote %s", out)
+
+
+def log_added(per_run, combo_order=None):
+    """One line per combination in the report, in the bar chart's order: its seeds and held-out top-1."""
+    log.info("combinations in the report:")
+    for combo in order(per_run["combo"].unique(), combo_order):
+        g = per_run[per_run["combo"] == combo]
+        seeds = ", ".join(str(int(s)) for s in g["seed"].dropna())
+        missing = int(g["top1"].isna().sum()) if "top1" in g else len(g)
+        top1 = g["top1"].mean() if "top1" in g and g["top1"].notna().any() else None
+        log.info("  added %s: %d seed(s) [%s]%s%s", combo, len(g), seeds,
+                 f", top1 {top1:.3f}" if top1 is not None else "",
+                 f" ({missing} without held-out evaluation)" if missing else "")
 
 
 def write_markdown(per_run, path, has_blend):
@@ -334,8 +359,7 @@ def training_comparison(combo_dirs, out, smooth):
     fig.text(0.99, 0.995, f"mean of seeds, band = min to max, rolling mean over {smooth} step(s)", ha="right",
              va="top", color=INK2)
     fig.tight_layout(rect=(0, 0, 1, 0.975))
-    fig.savefig(out / "training_comparison.png", dpi=110)
-    plt.close(fig)
+    save(fig, out / "training_comparison.png")
 
 
 def order(combos, combo_order=None):
@@ -420,8 +444,7 @@ def grouped_training(series, groups, colors, lines, title, filename, out, smooth
     fig.suptitle(f"{title} (mean of seeds, band = min to max, rolling mean over {smooth} step(s))",
                  x=0.01, ha="left", fontsize=11)
     fig.tight_layout(rect=(0, 0, 1, 0.98))
-    fig.savefig(out / filename, dpi=110)
-    plt.close(fig)
+    save(fig, out / filename)
 
 
 def grouped_horizon(series, groups, colors, lines, title, filename, per_run, out):
@@ -449,8 +472,7 @@ def grouped_horizon(series, groups, colors, lines, title, filename, per_run, out
         ax.legend(loc="upper right", fontsize=7.5)
     axes[0, 0].set_ylabel("held-out retrieval top-1")
     fig.tight_layout()
-    fig.savefig(out / filename, dpi=110)
-    plt.close(fig)
+    save(fig, out / filename)
 
 
 def by_loss_figures(arch, losses, combo_dirs, per_run, out, smooth):
@@ -499,8 +521,7 @@ def eval_comparison(per_run, out, colors=None, combo_order=None):
     axes[0, 0].invert_yaxis()
     fig.text(0.01, 0.005, "bar = mean over seeds, dots = individual seeds, line = range", color=INK2)
     fig.tight_layout(rect=(0, 0.03, 1, 1))
-    fig.savefig(out / "eval_comparison.png", dpi=110)
-    plt.close(fig)
+    save(fig, out / "eval_comparison.png")
 
 
 def horizon_comparison(per_run, out):
@@ -523,8 +544,7 @@ def horizon_comparison(per_run, out):
     axes[0].set_ylabel("held-out retrieval top-1")
     axes[0].legend(loc="upper right")
     fig.tight_layout()
-    fig.savefig(out / "top1_by_horizon.png", dpi=110)
-    plt.close(fig)
+    save(fig, out / "top1_by_horizon.png")
 
 
 def main():
