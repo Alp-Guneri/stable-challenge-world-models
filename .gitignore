@@ -12,3 +12,6 @@ runs/
 experiments/ablations/results/**
 !experiments/ablations/results/**/
 !experiments/ablations/results/**/report/**
+experiments/predictor_history/results/**
+!experiments/predictor_history/results/**/
+!experiments/predictor_history/results/**/report/**
