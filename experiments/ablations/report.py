@@ -80,6 +80,8 @@ PANELS = [
     ("train/cos_pred_target", "Cosine(prediction, target)"),
     ("train/emb_std", "Embedding std (mean over dims)"),
     ("train/emb_eff_rank", "Embedding effective rank"),
+    ("train/emb_partial_std", "Partial (context-only) embedding std"),  # causal encoders only
+    ("train/emb_partial_eff_rank", "Partial (context-only) embedding effective rank"),
     ("train/pred_std", "Prediction std (mean over dims)"),
     ("train/grad_norm_encoder", "Gradient norm, encoder"),
     ("train/grad_norm_predictor", "Gradient norm, predictor"),
@@ -240,8 +242,13 @@ def aggregate(rows):
     return {c: {"mean": df[c].mean(), "std": df[c].std(), "n": int(df[c].notna().sum())} for c in df}
 
 
-def report(results_dir, smooth=None):
+def report(results_dir, smooth=None, arch_style=None, arch_groups=None, combo_order=None):
+    """arch_style ({pair: (slot, line style)}), arch_groups ({panel title: [pairs]}) and combo_order (combination
+    names, in the order of the bar chart) let another experiment draw its own pairs (experiments/predictor_history);
+    by default they come from presets.py."""
     results_dir = Path(results_dir)
+    colors = {**ARCH_COLORS, **{k: PALETTE[slot - 1] for k, (slot, _) in (arch_style or {}).items()}}
+    lines = {**ARCH_LINES, **{k: style for k, (_, style) in (arch_style or {}).items()}}
     combo_dirs = sorted(d for d in results_dir.iterdir() if d.is_dir() and d.name.count("-") == 2)
     for d in combo_dirs:
         combo_report(d, smooth)
@@ -264,10 +271,11 @@ def report(results_dir, smooth=None):
         training_comparison(combo_dirs, out, smooth)
         horizon_comparison(per_run, out)
     for loss, archs in arch_suites(names).items():  # pairs beyond the main suite's (encoder suite): grouped
-        by_arch_figures(loss, archs, combo_dirs, per_run, out, smooth)
+        by_arch_figures(loss, archs, combo_dirs, per_run, out, smooth, arch_groups or presets.ARCH_GROUPS, colors,
+                        lines)
     for arch, losses in loss_suites(names).items():  # one pair with many loss presets: compare the losses
         by_loss_figures(arch, losses, combo_dirs, per_run, out, smooth)
-    eval_comparison(per_run, out)
+    eval_comparison(per_run, out, colors, combo_order)
     print(f"wrote {out}")
 
 
@@ -330,8 +338,12 @@ def training_comparison(combo_dirs, out, smooth):
     plt.close(fig)
 
 
-def order(combos):
-    """Grouped by loss (presets.py order), then by encoder-predictor pair (ARCHS order)."""
+def order(combos, combo_order=None):
+    """In combo_order if given (others last); otherwise grouped by loss (presets.py order), then by encoder-predictor
+    pair (ARCHS order)."""
+    if combo_order:
+        return sorted(combos, key=lambda c: (combo_order.index(c) if c in combo_order else len(combo_order), c))
+
     def key(c):
         arch, loss = split(c)
         return (presets.LOSSES.index(loss) if loss in presets.LOSSES else len(presets.LOSSES),
@@ -339,10 +351,10 @@ def order(combos):
     return sorted(combos, key=key)
 
 
-def combo_color(combo, single_arch):
+def combo_color(combo, single_arch, colors=None):
     """Color by encoder-predictor pair; by loss preset when every combination shares one pair."""
     arch, loss = split(combo)
-    return LOSS_COLORS.get(loss, INK2) if single_arch else ARCH_COLORS.get(arch, INK2)
+    return LOSS_COLORS.get(loss, INK2) if single_arch else (colors or ARCH_COLORS).get(arch, INK2)
 
 
 def loss_suites(combos):
@@ -451,21 +463,22 @@ def by_loss_figures(arch, losses, combo_dirs, per_run, out, smooth):
                     f"top1_by_horizon_by_loss_{arch}.png", per_run, out)
 
 
-def by_arch_figures(loss, archs, combo_dirs, per_run, out, smooth):
+def by_arch_figures(loss, archs, combo_dirs, per_run, out, smooth, arch_groups=None, colors=None, lines=None):
     """One loss, many encoder-predictor pairs beyond the main suite's (e.g. the encoder suite)."""
-    groups = groups_for(archs, presets.ARCH_GROUPS, "Other encoder-predictor pairs")
+    colors, lines = colors or ARCH_COLORS, lines or ARCH_LINES
+    groups = groups_for(archs, arch_groups or presets.ARCH_GROUPS, "Other encoder-predictor pairs")
     dirs = {split(d.name)[0]: d for d in combo_dirs if split(d.name)[1] == loss}
-    grouped_training({a: dirs[a] for a in archs if a in dirs}, groups, ARCH_COLORS, ARCH_LINES,
+    grouped_training({a: dirs[a] for a in archs if a in dirs}, groups, colors, lines,
                      f"loss {loss}: encoder-predictor pairs", f"training_by_arch_{loss}.png", out, smooth)
-    grouped_horizon({a: f"{a}-{loss}" for a in archs}, groups, ARCH_COLORS, ARCH_LINES, f"loss {loss}",
+    grouped_horizon({a: f"{a}-{loss}" for a in archs}, groups, colors, lines, f"loss {loss}",
                     f"top1_by_horizon_by_arch_{loss}.png", per_run, out)
 
 
-def eval_comparison(per_run, out):
+def eval_comparison(per_run, out, colors=None, combo_order=None):
     metrics = [(k, t) for k, t in EVAL_METRICS if k in per_run and per_run[k].notna().any()]
     if not metrics:
         return
-    combos = order(per_run["combo"].unique())
+    combos = order(per_run["combo"].unique(), combo_order)
     single_arch = len({split(c)[0] for c in combos}) == 1
     fig, axes = plt.subplots(1, len(metrics), figsize=(3.3 * len(metrics), 0.42 * len(combos) + 1.4),
                              sharey=True, squeeze=False)
@@ -475,7 +488,7 @@ def eval_comparison(per_run, out):
             values = per_run.loc[per_run["combo"] == combo, key].dropna().to_numpy()
             if not len(values):
                 continue
-            color = combo_color(combo, single_arch)
+            color = combo_color(combo, single_arch, colors)
             ax.barh(i, values.mean(), height=0.5, color=color, alpha=0.85)
             ax.plot(values, np.full(len(values), i), "o", color=INK, markersize=3.5, alpha=0.8)
             if len(values) > 1:
@@ -516,10 +529,11 @@ def horizon_comparison(per_run, out):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--name", default="default", help="experiments/ablations/results/<name>/")
+    p.add_argument("--name", default="default", help="<results-root>/<name>/")
+    p.add_argument("--results-root", type=Path, default=RESULTS)
     p.add_argument("--smooth", type=int, default=None, help="rolling-mean window in steps (default: run length/200)")
     args = p.parse_args()
-    report(RESULTS / args.name, args.smooth)
+    report(args.results_root / args.name, args.smooth)
 
 
 if __name__ == "__main__":

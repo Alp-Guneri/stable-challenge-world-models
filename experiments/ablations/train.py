@@ -2,7 +2,8 @@
 
     .venv/bin/python experiments/ablations/train.py --encoder vit --predictor ar --loss lewm --seeds 3 --name main
 
-Each seed writes experiments/ablations/results/<name>/<encoder>-<predictor>-<loss>/seed<k>/ (see README.md). A seed
+Each seed writes <results-root>/<name>/<encoder>-<predictor>-<loss>/seed<k>/ (default results-root:
+experiments/ablations/results; see README.md). A seed
 whose done.json exists is skipped, so a resubmitted job resumes where it stopped.
 
 Optimizers: one AdamW per network (stable-pretraining assigns parameters by module name), each with the settings of
@@ -111,7 +112,7 @@ def run_eval(script, args, log_path):
 def train_seed(args, seed, run_dir, corpus, train_eps):
     pl.seed_everything(seed, workers=True)
     model = models.WorldModel(args.encoder, args.predictor)
-    if args.predictor == "ar":
+    if hasattr(model.predictor, "set_action_stats"):  # the AR predictors normalize actions with corpus statistics
         model.predictor.set_action_stats(*action_stats(corpus, train_eps))
     counts = {g: sum(p.numel() for p in getattr(model, g).parameters()) for g in ("encoder", "predictor")}
     mib = sum(t.numel() for t in model.state_dict().values()) * 4 / 2**20
@@ -159,7 +160,7 @@ def train_seed(args, seed, run_dir, corpus, train_eps):
         "combo": run_dir.parent.name, "encoder": args.encoder, "predictor": args.predictor, "loss": args.loss,
         "seed": seed, "steps": args.steps, "batch_size": args.batch_size, "val_frac": args.val_frac,
         "train_episodes": len(train_eps), "precision": precision, "loss_weights": models.LOSS_PRESETS[args.loss],
-        "encoder_config": None if args.encoder == "cnn" else models.vit_config(args.encoder),
+        "encoder_config": models.encoder_config(args.encoder),
         "optim": {"encoder": models.OPTIM[args.encoder], "predictor": models.OPTIM[args.predictor]},
         "ref_long": models.REF_LONG, "lewm_long": models.LEWM_LONG,
         "parameters": counts, "float32_mib": round(mib, 2), "onnx_mib": round(os.path.getsize(run_dir / "model.onnx") / 2**20, 2),
@@ -200,11 +201,13 @@ def main():
                    help="float32 by default, the same on every GPU (ref_long and lewm_long used bf16-mixed)")
     p.add_argument("--log-every", type=int, default=1, help="log the training metrics every N steps")
     p.add_argument("--corpus", type=Path, default=ROOT / "corpus")
-    p.add_argument("--name", default="default", help="results go to experiments/ablations/results/<name>/")
+    p.add_argument("--name", default="default", help="results go to <results-root>/<name>/")
+    p.add_argument("--results-root", type=Path, default=RESULTS,
+                   help="default experiments/ablations/results (experiments/predictor_history uses its own)")
     p.add_argument("--skip-eval", action="store_true", help="skip test_submission / proxy_eval / action_diagnostic")
     args = p.parse_args()
 
-    combo_dir = RESULTS / args.name / combo_name(args.encoder, args.predictor, args.loss)
+    combo_dir = args.results_root / args.name / combo_name(args.encoder, args.predictor, args.loss)
     corpus = corpus_loader.load(args.corpus)
     train_eps, _ = corpus_loader.episode_split(corpus, args.val_frac)
     for seed in range(args.first_seed, args.first_seed + args.seeds):

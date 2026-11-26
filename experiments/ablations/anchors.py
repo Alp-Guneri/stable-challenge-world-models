@@ -30,12 +30,13 @@ def run(cmd, log):
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--name", default="default")
+    p.add_argument("--results-root", type=Path, default=HERE / "results")
     p.add_argument("--steps", type=int, default=6000, help="training steps of ref_holdout (README: 6000)")
     p.add_argument("--workers", type=int, default=6)
     p.add_argument("--precision", choices=("32-true", "bf16-mixed", "16-mixed"), default="32-true")
     p.add_argument("--corpus", type=Path, default=ROOT / "corpus")
     args = p.parse_args()
-    out = HERE / "results" / args.name / "anchors"
+    out = args.results_root / args.name / "anchors"
     floor, ref = out / "floor", out / "ref_holdout"
     for d in (floor, ref):
         d.mkdir(parents=True, exist_ok=True)

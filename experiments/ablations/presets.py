@@ -58,12 +58,38 @@ ENCODER_VARIANTS = {
     "vit_d48": dict(dim=48),
     "vit_ln": dict(proj_norm="layer"),
 }
-ENCODERS = ("cnn", *ENCODER_VARIANTS)
-PREDICTORS = ("mlp", "mlp1", "ar")
+# Predictor-history variants (experiments/predictor_history): how the history is split between encoder and predictor.
+# Encoders "<base>_<mode>", base = cnn or vitst (the spacetime ViT):
+#   clip2      each embedding sees 2 consecutive frames: context (t-10, t-5), (t-5, t), 2 embeddings
+#   causal     each embedding sees the frames up to its own within the last 3: context [t-10], [t-10, t-5],
+#              [t-10, t-5, t], 3 embeddings; one network for 1, 2 or 3 frames (CNN: missing frames zero-filled plus
+#              one "frame present" channel per slot; ViT: missing frames' tokens left out)
+#   causalsep  the same with a separate network (and projector) for each number of frames
+HISTORY_ENCODERS = {f"{base}_{mode}": (base, mode) for base in ("cnn", "vitst")
+                    for mode in ("clip2", "causal", "causalsep")}
+# Predictors "<family>_w<N>": the window (embeddings the predictor sees) is capped at N; with fewer context embeddings
+# it fills with the predictor's own predictions as the rollout goes ("mlp" and "ar" keep their windows: the encoder's
+# context length, and 3).
+#   mlp_w3, mlp_w5   the reference MLP over N slots; empty slots are zero-filled, plus one 0/1 "filled" input per slot
+#   ar_w2, ar_w5     LeWM's AR predictor with N positions
+HISTORY_PREDICTORS = {"mlp_w3": ("mlp", 3), "mlp_w5": ("mlp", 5), "ar_w2": ("ar", 2), "ar_w5": ("ar", 5)}
+
+ENCODERS = ("cnn", *ENCODER_VARIANTS, *HISTORY_ENCODERS)
+PREDICTORS = ("mlp", "mlp1", "ar", *HISTORY_PREDICTORS)
 
 
 def vit_config(name):
+    if name in HISTORY_ENCODERS:
+        return vit_config(HISTORY_ENCODERS[name][0])
     return {**VIT_BASE, **ENCODER_VARIANTS[name]}
+
+
+def encoder_config(name):
+    """Settings of encoder `name` for config.json: None for the plain CNN."""
+    if name in HISTORY_ENCODERS:
+        base, mode = HISTORY_ENCODERS[name]
+        return {"base": base, "history": mode, **(vit_config(base) if base != "cnn" else {})}
+    return None if name == "cnn" else vit_config(name)
 
 
 # ---------------------------------------------------------------------------------------------------- suites

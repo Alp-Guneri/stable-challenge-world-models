@@ -65,7 +65,14 @@ Use `.venv/bin/python` (or `uv run --no-sync`), not plain `uv run`: `uv run` fir
 
 `--cpu` runs everything on the CPU partition instead (no GPU; training falls back to float32, so it is much
 slower). Other entry points: `train.py` (one combination, locally or by hand), `anchors.py`, `report.py` (re-plot at any time,
-e.g. `--smooth 1` for raw curves), and `launch.py --dry-run` / `--combos ...` / `--seeds N`.
+e.g. `--smooth 1` for raw curves), and `launch.py --dry-run` / `--combos ...` / `--seeds N`. `--reuse-from` takes
+several runs (each combination comes from the first that has it).
+
+The launcher, `train.py`, `anchors.py` and `report.py` also serve
+[experiments/predictor_history](../predictor_history/README.md). That experiment has its own suites and results
+folder (`--results-root`), and its encoder and predictor variants live in `models.py` and `presets.py`
+(`HISTORY_ENCODERS`, `HISTORY_PREDICTORS`). Adding them did not change any existing preset: the same weights, outputs
+and loss terms at a fixed seed.
 
 ## Suites and loss presets
 
