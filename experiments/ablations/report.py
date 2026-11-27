@@ -249,15 +249,19 @@ def aggregate(rows):
     return {c: {"mean": df[c].mean(), "std": df[c].std(), "n": int(df[c].notna().sum())} for c in df}
 
 
-def report(results_dir, smooth=None, arch_style=None, arch_groups=None, combo_order=None):
-    """arch_style ({pair: (slot, line style)}), arch_groups ({panel title: [pairs]}) and combo_order (combination
-    names, in the order of the bar chart) let another experiment draw its own pairs (experiments/predictor_history);
-    by default they come from presets.py."""
+def report(results_dir, smooth=None, arch_style=None, arch_groups=None, combo_order=None, loss_style=None,
+           loss_groups=None):
+    """arch_style ({pair: (slot, line style)}), arch_groups ({panel title: [pairs]}), loss_style and loss_groups (the
+    same for loss presets) and combo_order (combination names, in the order of the bar chart) let another experiment
+    draw its own pairs or losses (experiments/predictor_history, experiments/infonce); by default they come from
+    presets.py."""
     logging.basicConfig(level=logging.INFO, format="%(message)s")  # no-op if the caller configured logging
     results_dir = Path(results_dir)
     log.info("report for %s", results_dir)
     colors = {**ARCH_COLORS, **{k: PALETTE[slot - 1] for k, (slot, _) in (arch_style or {}).items()}}
     lines = {**ARCH_LINES, **{k: style for k, (_, style) in (arch_style or {}).items()}}
+    loss_colors = {**LOSS_COLORS, **{k: PALETTE[slot - 1] for k, (slot, _) in (loss_style or {}).items()}}
+    loss_lines = {**LOSS_LINES, **{k: style for k, (_, style) in (loss_style or {}).items()}}
     combo_dirs = sorted(d for d in results_dir.iterdir() if d.is_dir() and d.name.count("-") == 2)
     for d in combo_dirs:
         if not seed_dirs(d):
@@ -286,8 +290,9 @@ def report(results_dir, smooth=None, arch_style=None, arch_groups=None, combo_or
         by_arch_figures(loss, archs, combo_dirs, per_run, out, smooth, arch_groups or presets.ARCH_GROUPS, colors,
                         lines)
     for arch, losses in loss_suites(names).items():  # one pair with many loss presets: compare the losses
-        by_loss_figures(arch, losses, combo_dirs, per_run, out, smooth)
-    eval_comparison(per_run, out, colors, combo_order)
+        by_loss_figures(arch, losses, combo_dirs, per_run, out, smooth, loss_groups or presets.LOSS_GROUPS,
+                        loss_colors, loss_lines)
+    eval_comparison(per_run, out, colors, combo_order, loss_colors)
     log.info("wrote %s", out)
 
 
@@ -375,10 +380,10 @@ def order(combos, combo_order=None):
     return sorted(combos, key=key)
 
 
-def combo_color(combo, single_arch, colors=None):
+def combo_color(combo, single_arch, colors=None, loss_colors=None):
     """Color by encoder-predictor pair; by loss preset when every combination shares one pair."""
     arch, loss = split(combo)
-    return LOSS_COLORS.get(loss, INK2) if single_arch else (colors or ARCH_COLORS).get(arch, INK2)
+    return (loss_colors or LOSS_COLORS).get(loss, INK2) if single_arch else (colors or ARCH_COLORS).get(arch, INK2)
 
 
 def loss_suites(combos):
@@ -475,13 +480,14 @@ def grouped_horizon(series, groups, colors, lines, title, filename, per_run, out
     save(fig, out / filename)
 
 
-def by_loss_figures(arch, losses, combo_dirs, per_run, out, smooth):
+def by_loss_figures(arch, losses, combo_dirs, per_run, out, smooth, loss_groups=None, colors=None, lines=None):
     """One encoder-predictor pair, many loss presets (e.g. the loss suite)."""
-    groups = groups_for(losses, presets.LOSS_GROUPS, "Other losses")
+    colors, lines = colors or LOSS_COLORS, lines or LOSS_LINES
+    groups = groups_for(losses, loss_groups or presets.LOSS_GROUPS, "Other losses")
     dirs = {split(d.name)[1]: d for d in combo_dirs if split(d.name)[0] == arch}
-    grouped_training({l: dirs[l] for l in losses if l in dirs}, groups, LOSS_COLORS, LOSS_LINES,
+    grouped_training({l: dirs[l] for l in losses if l in dirs}, groups, colors, lines,
                      f"{arch}: loss presets", f"training_by_loss_{arch}.png", out, smooth)
-    grouped_horizon({l: f"{arch}-{l}" for l in losses}, groups, LOSS_COLORS, LOSS_LINES, arch,
+    grouped_horizon({l: f"{arch}-{l}" for l in losses}, groups, colors, lines, arch,
                     f"top1_by_horizon_by_loss_{arch}.png", per_run, out)
 
 
@@ -496,7 +502,7 @@ def by_arch_figures(loss, archs, combo_dirs, per_run, out, smooth, arch_groups=N
                     f"top1_by_horizon_by_arch_{loss}.png", per_run, out)
 
 
-def eval_comparison(per_run, out, colors=None, combo_order=None):
+def eval_comparison(per_run, out, colors=None, combo_order=None, loss_colors=None):
     metrics = [(k, t) for k, t in EVAL_METRICS if k in per_run and per_run[k].notna().any()]
     if not metrics:
         return
@@ -510,7 +516,7 @@ def eval_comparison(per_run, out, colors=None, combo_order=None):
             values = per_run.loc[per_run["combo"] == combo, key].dropna().to_numpy()
             if not len(values):
                 continue
-            color = combo_color(combo, single_arch, colors)
+            color = combo_color(combo, single_arch, colors, loss_colors)
             ax.barh(i, values.mean(), height=0.5, color=color, alpha=0.85)
             ax.plot(values, np.full(len(values), i), "o", color=INK, markersize=3.5, alpha=0.8)
             if len(values) > 1:

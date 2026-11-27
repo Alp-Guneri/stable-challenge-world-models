@@ -22,6 +22,24 @@ LOSS_PRESETS = {
     "ref_tau005": dict(mse=25, infonce=1, tau=0.05, vcreg=1, vcreg_t=1, sigreg=0),
     "ref_tau02": dict(mse=25, infonce=1, tau=0.2, vcreg=1, vcreg_t=1, sigreg=0),
 }
+ABLATION_LOSSES = tuple(LOSS_PRESETS)  # the loss suite's presets
+
+# InfoNCE experiments (experiments/infonce): further loss presets, registered here so that train.py and the launcher
+# accept them. Their suites, report panels and colors are in experiments/infonce/infonce_presets.py.
+# Weight grid: every InfoNCE weight in NCE_GRID x MSE weight in MSE_GRID, the rest as ref. ref_nce2x and ref_nce05x
+# above are the grid's (2, 25) and (0.5, 25) points, so they are not repeated.
+NCE_GRID, MSE_GRID = (0.5, 2, 4, 8, 16, 32), (25, 12, 6)
+
+
+def grid_name(nce, mse):
+    """ref_nce<w>x at ref's MSE weight (as ref_nce2x), ref_nce<w>x_mse<m> otherwise. A decimal weight drops its point,
+    as the loss suite's ref_nce05x (InfoNCE 0.5)."""
+    return f"ref_nce{nce:g}x".replace(".", "") + ("" if mse == 25 else f"_mse{mse}")
+
+
+INFONCE_PRESETS = {grid_name(n, m): dict(mse=m, infonce=n, tau=0.1, vcreg=1, vcreg_t=1, sigreg=0)
+                   for m in MSE_GRID for n in NCE_GRID if grid_name(n, m) not in LOSS_PRESETS}
+LOSS_PRESETS.update(INFONCE_PRESETS)
 LOSSES = tuple(LOSS_PRESETS)
 
 # How the report groups losses into panels (at most 5 lines each), and each loss's color slot and line style. Color
@@ -99,7 +117,7 @@ SUITES = {
     "main": [f"{e}-{p}-{l}" for e in ("cnn", "vit") for p in ("mlp", "ar") for l in ("ref", "lewm")]
             + ["vit-mlp1-ref"],
     # the best architecture (CNN encoder, MLP predictor) with every loss preset
-    "loss": [f"cnn-mlp-{l}" for l in LOSSES],
+    "loss": [f"cnn-mlp-{l}" for l in ABLATION_LOSSES],
     # why is the ViT behind the CNN? every ViT variant with the MLP predictor and the reference loss. Controls
     # (reused from main with --reuse-from main): cnn-mlp (the target), vit-mlp (the baseline), vit-mlp1 (no history)
     "encoder": ["cnn-mlp-ref", "vit-mlp-ref", "vit-mlp1-ref", "vitstack-mlp-ref", "vitst-mlp-ref",

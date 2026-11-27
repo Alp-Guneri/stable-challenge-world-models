@@ -15,3 +15,6 @@ experiments/ablations/results/**
 experiments/predictor_history/results/**
 !experiments/predictor_history/results/**/
 !experiments/predictor_history/results/**/report/**
+experiments/infonce/results/**
+!experiments/infonce/results/**/
+!experiments/infonce/results/**/report/**
